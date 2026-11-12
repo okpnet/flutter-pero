@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../model/model.dart';
 import 'integrity.dart';
@@ -15,15 +16,40 @@ class SaveResult {
   bool get isOk => error == null;
 }
 
+/// 保存の準備の結果(整合性確認を済ませたバイト列)。
+class PreparedSave {
+  PreparedSave.ok(this.bytes, this.repairs) : error = null;
+  PreparedSave.fail(this.error)
+      : bytes = null,
+        repairs = Repairs();
+  final Uint8List? bytes;
+  final Repairs repairs;
+  final String? error;
+  bool get isOk => error == null;
+}
+
 /// `.pero` ファイルの読み書き(4.1、9.4)。
 class PeroFile {
+  /// 保存の準備: 整合性確認(修復を含む)を行い、書き込むバイト列(UTF-8、BOMなし)を作る(9.4-1)。
+  /// ファイル選択ダイアログが書込みまで行う場合にも使える(現在は file_selector のため、書込みはアプリが行う)。
+  static PreparedSave prepare(ErModel model) {
+    final (ok, repairs) = IntegrityRepairer.repairAll(model);
+    if (!ok) return PreparedSave.fail('整合性を回復できないため保存を中止しました');
+    return PreparedSave.ok(Uint8List.fromList(utf8.encode(PeroEncoder.encode(model))), repairs);
+  }
+
   /// 保存: 整合性確認 → 一時ファイルに書く → リネーム(4.1-3)。
   static Future<SaveResult> save(ErModel model, String path) async {
-    final (ok, repairs) = IntegrityRepairer.repairAll(model);
-    if (!ok) return SaveResult.fail('整合性を回復できないため保存を中止しました');
+    final prep = prepare(model);
+    if (!prep.isOk) return SaveResult.fail(prep.error);
+    return writeAtomically(path, prep.bytes!, prep.repairs);
+  }
+
+  /// バイト列を一時ファイルに書いてからリネームする(途中で失敗しても元のファイルを壊さない)。
+  static Future<SaveResult> writeAtomically(String path, Uint8List bytes, Repairs repairs) async {
     final tmp = File('$path.tmp');
     try {
-      await tmp.writeAsString(PeroEncoder.encode(model), encoding: utf8, flush: true);
+      await tmp.writeAsBytes(bytes, flush: true);
       await tmp.rename(path);
       return SaveResult.ok(repairs);
     } on FileSystemException catch (e) {

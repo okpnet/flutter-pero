@@ -62,33 +62,48 @@ Future<void> showGenerationResult(BuildContext context,
 
 /// 画像出力のオプション(9.8-2)。
 class ImageExportOptions {
-  ImageExportOptions({required this.perPage, required this.dpi});
+  ImageExportOptions({required this.perPage, required this.dpi, this.pdf = false});
   final bool perPage;
   final int dpi;
+
+  /// 形式。真ならPDF、偽ならPNG。
+  final bool pdf;
 }
 
 Future<ImageExportOptions?> showImageExportDialog(BuildContext context, int defaultDpi) {
   var perPage = true;
+  var pdf = false;
   final ctrl = TextEditingController(text: '$defaultDpi');
   String? err;
   return showDialog<ImageExportOptions>(
     context: context,
     builder: (c) => StatefulBuilder(
       builder: (c, setState) => AlertDialog(
-        title: const Text('画像出力(PNG)'),
+        title: const Text('画像出力'),
         content: SizedBox(
-          width: 360,
+          width: 380,
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('形式: PNG(PDF出力は今後のバージョンで対応します)'),
+            const Text('形式'),
+            RadioGroup<bool>(
+              groupValue: pdf,
+              onChanged: (v) => setState(() => pdf = v ?? false),
+              child: const Column(children: [
+                RadioListTile<bool>(dense: true, title: Text('PNG'), value: false),
+                RadioListTile<bool>(dense: true, title: Text('PDF'), value: true),
+              ]),
+            ),
             const SizedBox(height: 8),
+            const Text('範囲'),
             RadioGroup<bool>(
               groupValue: perPage,
               onChanged: (v) => setState(() => perPage = v ?? true),
-              child: const Column(children: [
-                RadioListTile<bool>(dense: true, title: Text('用紙ページごと'), value: true),
-                RadioListTile<bool>(dense: true, title: Text('全体を1枚'), value: false),
+              child: Column(children: [
+                RadioListTile<bool>(
+                    dense: true, title: Text(pdf ? '用紙ページごと(1ページ=PDFの1ページ)' : '用紙ページごと(1ページ=1ファイル)'), value: true),
+                const RadioListTile<bool>(dense: true, title: Text('全体を1枚'), value: false),
               ]),
             ),
+            const SizedBox(height: 8),
             TextField(
               controller: ctrl,
               decoration: InputDecoration(labelText: '解像度(dpi 100〜600)', errorText: err, isDense: true),
@@ -105,7 +120,7 @@ Future<ImageExportOptions?> showImageExportDialog(BuildContext context, int defa
                 setState(() => err = '100〜600の整数');
                 return;
               }
-              Navigator.pop(c, ImageExportOptions(perPage: perPage, dpi: v));
+              Navigator.pop(c, ImageExportOptions(perPage: perPage, dpi: v, pdf: pdf));
             },
             child: const Text(Strings.ok),
           ),

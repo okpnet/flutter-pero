@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:project_er_operation/command/command.dart';
@@ -118,5 +119,32 @@ void main() {
     s.openRecovered(fullModel(), r'C:\x\y.pero');
     expect(s.isDirty, isTrue);
     expect(s.filePath, r'C:\x\y.pero');
+  });
+
+  test('ダイアログが書き込む保存(saveVia): 整合性確認済みのバイト列を渡し、成功で未保存を解除する', () async {
+    final s = newSession(model: fullModel());
+    s.run(AddTableCommand(diagramId: s.diagram.id, x: 0, y: 0));
+    expect(s.isDirty, isTrue);
+    Uint8List? got;
+    final r = await s.saveVia((bytes) async {
+      got = bytes;
+      final path = p('via.pero');
+      return (await PeroFile.writeAtomically(path, bytes, Repairs())).isOk ? path : null;
+    });
+    expect(r!.isOk, isTrue);
+    expect(s.isDirty, isFalse);
+    expect(s.filePath, p('via.pero'));
+    expect(String.fromCharCodes(got!).startsWith('{\n  "formatVersion": 1'), isTrue);
+    expect((await PeroFile.open(p('via.pero'))).model, isNotNull);
+    expect(File(p('via.pero.tmp')).existsSync(), isFalse);
+  });
+
+  test('保存先の選択をキャンセルしたとき(saveVia)は null を返し、状態を変えない', () async {
+    final s = newSession();
+    s.run(AddTableCommand(diagramId: s.diagram.id, x: 0, y: 0));
+    final r = await s.saveVia((_) async => null);
+    expect(r, isNull);
+    expect(s.isDirty, isTrue);
+    expect(s.filePath, isNull);
   });
 }
