@@ -3,7 +3,7 @@ import 'dart:convert';
 import '../model/model.dart';
 
 /// 現行のフォーマットバージョン。
-const int currentFormatVersion = 1;
+const int currentFormatVersion = 2;
 
 /// `.pero` の保存形式(付録A)。スキーマを明示的に定義した実装(11.4)。
 /// キーの順は付録Aのとおり。
@@ -26,6 +26,8 @@ class PeroEncoder {
           'postPath': m.properties.postPath,
           'startQuery': m.properties.startQuery,
           'endQuery': m.properties.endQuery,
+          'schema': m.properties.schema,
+          'includeSchema': m.properties.includeSchema,
         },
         'types': m.types.map(typeToMap).toList(),
         'methods': m.methods.map(methodToMap).toList(),
@@ -52,6 +54,18 @@ class PeroEncoder {
         },
         'category': t.category.wire,
         'physical': _perDb(t.physical),
+        'kind': t.kind.wire,
+        'fields': [
+          for (final f in t.fields)
+            {
+              'name': f.name,
+              'typeId': f.typeId,
+              'length': f.length,
+              'precision': f.precision,
+              'scale': f.scale,
+            }
+        ],
+        'enumValues': t.enumValues,
       };
 
   static Map<String, Object?> methodToMap(MethodDef x) => {
@@ -61,6 +75,9 @@ class PeroEncoder {
         'external': x.external,
         'call': _perDb(x.call),
         'bodies': _perDb(x.bodies),
+        'comment': x.comment,
+        'args': x.args,
+        'dependsOnTableIds': x.dependsOnTableIds,
       };
 
   static Map<String, Object?> columnToMap(ColumnDef c, {required bool withPk}) => {
@@ -76,6 +93,7 @@ class PeroEncoder {
         'defaultKind': c.defaultKind.wire,
         'defaultValue': c.defaultValue,
         'defaultMethodId': c.defaultMethodId,
+        'defaultExpression': c.defaultExpression,
         'comment': c.comment,
       };
 
@@ -89,8 +107,16 @@ class PeroEncoder {
         'columns': p.columns.map((c) => columnToMap(c, withPk: false)).toList(),
       };
 
-  static Map<String, Object?> constraintToMap(ConstraintDef c) =>
-      {'id': c.id, 'nameMode': c.nameMode.wire, 'name': c.name, 'columnIds': c.columnIds};
+  static Map<String, Object?> constraintToMap(ConstraintDef c) => {
+        'id': c.id,
+        'nameMode': c.nameMode.wire,
+        'name': c.name,
+        'columnIds': c.columnIds,
+        'nullsNotDistinct': c.nullsNotDistinct,
+      };
+
+  static Map<String, Object?> checkToMap(CheckDef c) =>
+      {'id': c.id, 'nameMode': c.nameMode.wire, 'name': c.name, 'expression': c.expression};
 
   static Map<String, Object?> triggerToMap(TriggerDef g) => {
         'id': g.id,
@@ -103,6 +129,8 @@ class PeroEncoder {
         'events': g.events.map((e) => e.wire).toList(),
         'forEach': g.forEach.wire,
         'when': g.when,
+        'args': g.args,
+        'updateColumnIds': g.updateColumnIds,
       };
 
   static Map<String, Object?> entityToMap(Entity e) {
@@ -117,6 +145,7 @@ class PeroEncoder {
         'columns': e.columns.map((c) => columnToMap(c, withPk: true)).toList(),
         'indexes': e.indexes.map(constraintToMap).toList(),
         'uniques': e.uniques.map(constraintToMap).toList(),
+        'checks': e.checks.map(checkToMap).toList(),
         'preQuery': e.preQuery,
         'postQuery': e.postQuery,
         'triggers': e.triggers.map(triggerToMap).toList(),
@@ -170,6 +199,19 @@ class PeroEncoder {
                 })
             .toList(),
       },
+      'sql': {
+        'sql': v.sql.sql,
+        'columns': v.sql.columns
+            .map((c) => {
+                  'name': c.name,
+                  'logicalName': c.logicalName,
+                  'typeId': c.typeId,
+                  'length': c.length,
+                  'precision': c.precision,
+                  'scale': c.scale,
+                })
+            .toList(),
+      },
       'preQuery': v.preQuery,
       'postQuery': v.postQuery,
     };
@@ -191,6 +233,7 @@ class PeroEncoder {
         'name': r.name,
         'onDelete': r.onDelete.wire,
         'onUpdate': r.onUpdate.wire,
+        'deferrable': r.deferrable.wire,
       };
 
   static Map<String, Object?> diagramToMap(Diagram d) => {
@@ -204,5 +247,6 @@ class PeroEncoder {
             .map((p) => {'entityId': p.entityId, 'x': p.x, 'y': p.y, 'collapsed': p.collapsed})
             .toList(),
         'view': {'zoom': d.view.zoom, 'scrollX': d.view.scrollX, 'scrollY': d.view.scrollY},
+        'schema': d.schema,
       };
 }

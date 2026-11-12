@@ -12,8 +12,12 @@ class RelationshipSegment {
     required this.bothPlaced,
     this.fromIsParent = true,
     this.label,
+    this.route,
   });
   final Relationship relationship;
+
+  /// 折れ線で描くとき(自己参照のリレーションシップ)の経路。先頭が親側、末尾が子側の端点。
+  final List<Offset>? route;
 
   /// 親側の端点。片端のみ配置のときは、配置されている側の端点。
   final Offset from;
@@ -28,10 +32,30 @@ class RelationshipSegment {
   /// 片端のみ配置のときの、相手エンティティの表示名(5.2-6)。
   final String? label;
 
-  Offset get mid => Offset((from.dx + to.dx) / 2, (from.dy + to.dy) / 2);
+  Offset get mid {
+    final r = route;
+    if (r != null && r.length >= 2) {
+      final i = r.length ~/ 2;
+      return Offset((r[i - 1].dx + r[i].dx) / 2, (r[i - 1].dy + r[i].dy) / 2);
+    }
+    return Offset((from.dx + to.dx) / 2, (from.dy + to.dy) / 2);
+  }
 
-  /// 点から線分までの距離。
+  /// 点から線(折れ線を含む)までの距離。
   double distanceTo(Offset p) {
+    final r = route;
+    if (r != null && r.length >= 2) {
+      var best = double.infinity;
+      for (var i = 1; i < r.length; i++) {
+        final d = _segDistance(r[i - 1], r[i], p);
+        if (d < best) best = d;
+      }
+      return best;
+    }
+    return _segDistance(from, to, p);
+  }
+
+  static double _segDistance(Offset from, Offset to, Offset p) {
     final d = to - from;
     final len2 = d.dx * d.dx + d.dy * d.dy;
     if (len2 == 0) return (p - from).distance;
@@ -62,10 +86,28 @@ List<RelationshipSegment> relationshipSegments(
   final out = <RelationshipSegment>[];
   // 片端のみ配置: 同じ側(エンティティごと)に複数ある場合は縦に16pxずつずらす。
   final stub = <int, int>{};
+  final loops = <int, int>{};
   for (final r in model.relationships) {
     final pr = rectOf(r.parentId);
     final cr = rectOf(r.childId);
-    if (pr != null && cr != null) {
+    if (pr != null && r.parentId == r.childId) {
+      // 自己参照: 右辺から右へ出て戻る折れ線。同じテーブルに複数あるときは下へずらす。
+      final k = loops[r.parentId] = (loops[r.parentId] ?? -1) + 1;
+      final y1 = pr.top + headerHeight + 12 + k * 36;
+      final route = [
+        Offset(pr.right, y1),
+        Offset(pr.right + 36, y1),
+        Offset(pr.right + 36, y1 + 22),
+        Offset(pr.right, y1 + 22),
+      ];
+      out.add(RelationshipSegment(
+        relationship: r,
+        from: route.first,
+        to: route.last,
+        bothPlaced: true,
+        route: route,
+      ));
+    } else if (pr != null && cr != null) {
       out.add(RelationshipSegment(
         relationship: r,
         from: clipToRect(pr, cr.center),

@@ -18,9 +18,10 @@ bool prepareQuickJs() {
 final String postScript = File('post/postgresql.post').readAsStringSync();
 
 /// モデルから、同梱の postgresql.post でSQLを生成する。
-Future<String> generateSql(ErModel model) async {
-  final r = await GenerationService(JsPostRunner())
-      .generate(model, postScript, timeout: const Duration(seconds: 20));
+Future<String> generateSql(ErModel model,
+    {bool dropBeforeCreate = false, PkNaming pkNaming = const PkNaming()}) async {
+  final r = await GenerationService(JsPostRunner()).generate(model, postScript,
+      timeout: const Duration(seconds: 20), dropBeforeCreate: dropBeforeCreate, pkNaming: pkNaming);
   if (!r.isOk) {
     throw StateError('検証エラー: ${r.errors.map((e) => e.message).join(' / ')}');
   }

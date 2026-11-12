@@ -81,6 +81,11 @@ class RemoveColumnCommand extends ModelCommand {
     for (final r in _relsUsing(m, columnId)) {
       out.add('リレーションシップ ${m.foreignKeyName(r)}: 削除');
     }
+    for (final g in t.triggers) {
+      if (g.updateColumnIds.contains(columnId)) {
+        out.add('トリガー ${m.triggerName(t, g)}: UPDATE列から除外');
+      }
+    }
     return out;
   }
 
@@ -101,6 +106,9 @@ class RemoveColumnCommand extends ModelCommand {
         c.columnIds.remove(columnId);
       }
       list.removeWhere((c) => c.columnIds.isEmpty);
+    }
+    for (final g in t.triggers) {
+      g.updateColumnIds.remove(columnId);
     }
     t.columns.removeWhere((c) => c.id == columnId);
     ctx.recalcAllPages();

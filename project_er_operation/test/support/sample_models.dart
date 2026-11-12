@@ -8,6 +8,7 @@ ColumnDef col(ErModel m, String phys, String typeId,
         DefaultKind defKind = DefaultKind.none,
         String defValue = '',
         int? defMethod,
+        String defExpression = '',
         String comment = ''}) =>
     ColumnDef(
       id: m.allocateId(),
@@ -20,6 +21,7 @@ ColumnDef col(ErModel m, String phys, String typeId,
       defaultKind: defKind,
       defaultValue: defValue,
       defaultMethodId: defMethod,
+      defaultExpression: defExpression,
       comment: comment,
     );
 
@@ -39,7 +41,23 @@ ErModel fullModel() {
     ..outputFileName = 'out'
     ..outputFolder = r'C:\out'
     ..startQuery = '-- start'
-    ..endQuery = '-- end';
+    ..endQuery = '-- end'
+    ..schema = 'app'
+    ..includeSchema = true;
+  m.types.addAll([
+    DataType(
+        id: 'custom_2',
+        displayName: 'point_t',
+        physical: {DbKind.postgresql: 'point_t'},
+        kind: TypeKind.composite,
+        fields: [TypeField(name: 'x', typeId: 'integer'), TypeField(name: 'label', typeId: 'varchar', length: 20)]),
+    DataType(
+        id: 'custom_3',
+        displayName: 'status_t',
+        physical: {DbKind.postgresql: 'status_t'},
+        kind: TypeKind.enumeration,
+        enumValues: ['open', 'closed']),
+  ]);
   m.types.add(DataType(
       id: 'custom_1',
       displayName: 'money',
@@ -51,6 +69,8 @@ ErModel fullModel() {
   final fn = MethodDef(
       id: m.allocateId(),
       name: 'now_utc',
+      comment: '現在のUTC時刻',
+      args: '',
       call: {DbKind.postgresql: "timezone('utc', now())", DbKind.mysql: '', DbKind.sqlserver: '', DbKind.sqlite: ''},
       bodies: {DbKind.postgresql: 'CREATE FUNCTION now_utc() ...', DbKind.mysql: '', DbKind.sqlserver: '', DbKind.sqlite: ''});
   final trg = MethodDef(
@@ -84,19 +104,25 @@ ErModel fullModel() {
     col(m, 'id', 'auto', pk: true),
     col(m, 'customer_id', 'integer', notNull: true),
     col(m, 'price', 'custom_1', defKind: DefaultKind.value, defValue: '0'),
+    col(m, 'due', 'date', defKind: DefaultKind.expression, defExpression: 'CURRENT_DATE + 30'),
   ], logical: '注文', x: 400);
+  fn.dependsOnTableIds = [customers.id];
+  orders.checks.add(CheckDef(id: m.allocateId(), nameMode: NameMode.manual, name: 'orders_ck_price', expression: 'price >= 0'));
   orders.indexes.add(ConstraintDef(id: m.allocateId(), columnIds: [orders.columns[1].id]));
   orders.uniques.add(ConstraintDef(
       id: m.allocateId(),
       nameMode: NameMode.manual,
       name: 'orders_uq_custom',
-      columnIds: [orders.columns[0].id, orders.columns[1].id]));
+      columnIds: [orders.columns[0].id, orders.columns[1].id],
+      nullsNotDistinct: true));
   orders.triggers.add(TriggerDef(
       id: m.allocateId(),
       source: TriggerSource.public,
       methodId: trg.id,
       events: [TriggerEvent.insert, TriggerEvent.update],
       timing: TriggerTiming.after,
+      args: "'80'",
+      updateColumnIds: [orders.columns[2].id],
       when: 'NEW.price > 0'));
   orders.triggers.add(TriggerDef(
       id: m.allocateId(),
@@ -108,6 +134,7 @@ ErModel fullModel() {
     columnPairs: [ColumnPair(parentColumnId: customers.columns[0].id, childColumnId: orders.columns[1].id)],
     onDelete: RefAction.cascade,
     onUpdate: RefAction.none,
+    deferrable: Deferrable.deferred,
   ));
   final joinView = ViewEntity(
     id: m.allocateId(),
@@ -137,9 +164,18 @@ ErModel fullModel() {
     ]),
   );
   m.entities.add(fnView);
+  final sqlView = ViewEntity(
+    id: m.allocateId(),
+    physicalName: 'v_sql',
+    comment: 'SQLビュー',
+    viewType: ViewType.sql,
+    sql: ViewSqlDef(sql: 'SELECT id FROM customers', columns: [FunctionReturnColumn(name: 'id', typeId: 'integer')]),
+  );
+  m.entities.add(sqlView);
   m.diagrams.first
     ..placements.add(Placement(entityId: joinView.id, x: 100, y: 500, collapsed: true))
     ..placements.add(Placement(entityId: fnView.id, x: 500, y: 500))
+    ..placements.add(Placement(entityId: sqlView.id, x: 800, y: 500))
     ..view = DiagramView(zoom: 1.5, scrollX: 10, scrollY: 20);
   m.diagrams.add(Diagram(
       id: m.allocateId(),
@@ -147,7 +183,8 @@ ErModel fullModel() {
       pageSize: PageSize.a4,
       orientation: Orientation.portrait,
       pageRows: 2,
-      pageCols: 3));
+      pageCols: 3,
+      schema: 'other'));
   return m;
 }
 

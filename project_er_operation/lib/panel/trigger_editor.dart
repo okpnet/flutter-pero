@@ -235,6 +235,53 @@ class _TriggerCardState extends State<_TriggerCard> {
                     : null,
               ),
           ]),
+          if (g.events.contains(TriggerEvent.update)) ...[
+            const SizedBox(height: 16),
+            DropdownButtonFormField<bool>(
+              key: ValueKey('tuc${g.id}${g.updateColumnIds.isNotEmpty}'),
+              initialValue: g.updateColumnIds.isNotEmpty,
+              isExpanded: true,
+              decoration: _deco('UPDATEの対象'),
+              items: const [
+                DropdownMenuItem(value: false, child: Text('テーブル全体')),
+                DropdownMenuItem(value: true, child: Text('指定した列(UPDATE OF)')),
+              ],
+              onChanged: en
+                  ? (v) => widget.onEdit((x) {
+                        if (v == true) {
+                          if (x.updateColumnIds.isEmpty) {
+                            final cols = m.expand(widget.table).columns;
+                            if (cols.isNotEmpty) x.updateColumnIds = [cols.first.column.id];
+                          }
+                        } else {
+                          x.updateColumnIds = [];
+                        }
+                      })
+                  : null,
+            ),
+            if (g.updateColumnIds.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(spacing: 6, runSpacing: 4, children: [
+                for (final c in m.expand(widget.table).columns)
+                  FilterChip(
+                    label: Text(c.column.physicalName,
+                        style: TextStyle(fontSize: 11, fontStyle: c.isCommon ? FontStyle.italic : null)),
+                    selected: g.updateColumnIds.contains(c.column.id),
+                    onSelected: en
+                        ? (sel) => widget.onEdit((x) {
+                              if (sel) {
+                                if (!x.updateColumnIds.contains(c.column.id)) {
+                                  x.updateColumnIds.add(c.column.id);
+                                }
+                              } else if (x.updateColumnIds.length > 1) {
+                                x.updateColumnIds.remove(c.column.id);
+                              }
+                            })
+                        : null,
+                  ),
+              ]),
+            ],
+          ],
           const SizedBox(height: 16),
           CommitTextField(
             key: ValueKey('tw${g.id}'),
@@ -242,6 +289,14 @@ class _TriggerCardState extends State<_TriggerCard> {
             value: g.when,
             enabled: en,
             onCommit: (v) => widget.onEdit((x) => x.when = v),
+          ),
+          const SizedBox(height: 16),
+          CommitTextField(
+            key: ValueKey('ta${g.id}'),
+            label: '関数への引数(例: \'80\', 1)',
+            value: g.args,
+            enabled: en,
+            onCommit: (v) => widget.onEdit((x) => x.args = v),
           ),
         ],
       ),

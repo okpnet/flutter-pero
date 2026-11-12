@@ -19,7 +19,6 @@ List<ColumnDef> parentKeyColumns(ErModel m, TableEntity parent) {
 
 /// リレーションシップを追加できるか。できないときは理由(4.2-5)。
 String? relationshipAddBlocker(ErModel m, TableEntity a, TableEntity b) {
-  if (a.id == b.id) return '自己参照のリレーションシップは作成できません';
   if (a.locked || b.locked) return 'ロック中のテーブルがあります。ロックを解除してください';
   final parent = a.id < b.id ? a : b;
   if (parentKeyColumns(m, parent).isEmpty) {
@@ -66,7 +65,9 @@ List<ColumnPair> assignForeignKeyColumns(
   final taken = <int>{
     for (final r in m.relationships)
       if (r.parentId == parent.id && r.childId == child.id && r.id != excludeRelationshipId)
-        for (final p in r.columnPairs) p.childColumnId
+        for (final p in r.columnPairs) p.childColumnId,
+    // 自己参照では、親の鍵の列自身を外部キー列にしない。
+    if (parent.id == child.id) ...parentKeyColumns(m, parent).map((c) => c.id),
   };
   final pairs = <ColumnPair>[];
   for (final p in parentKeyColumns(m, parent)) {
@@ -170,11 +171,11 @@ class AddRelationshipCommand extends ModelCommand {
     final parent = parentId != null ? (parentId == a.id ? a : b) : (a.id < b.id ? a : b);
     final child = parent.id == a.id ? b : a;
     if (a.locked || b.locked) throw CommandException(lockedMessage);
-    if (a.id == b.id) throw CommandException('自己参照のリレーションシップは作成できません');
     if (parentKeyColumns(m, parent).isEmpty) {
       throw CommandException('親になるテーブル「${parent.displayLabel}」に主キーまたはユニーク制約がありません');
     }
-    const dependency = true;
+    // 自己参照は、子の外部キー列を主キーに含めない(依存関係なし)。
+    final dependency = a.id != b.id;
     final r = Relationship(
         id: m.allocateId(), parentId: parent.id, childId: child.id, dependency: dependency);
     final preset = <int, int>{};
@@ -188,7 +189,7 @@ class AddRelationshipCommand extends ModelCommand {
       preset[parentColumnId!] = childColumnId!;
     }
     r.columnPairs = assignForeignKeyColumns(m, parent, child, dependency: dependency, preset: preset);
-    applyLinkage(child, r.columnPairs, true, true);
+    if (dependency) applyLinkage(child, r.columnPairs, true, true);
     m.relationships.add(r);
     createdId = r.id;
     ctx.recalcAllPages();
@@ -225,7 +226,7 @@ class UpdateRelationshipCommand extends ModelCommand {
   UpdateRelationshipCommand(this.id, this.patch, {this.link = false});
   final int id;
 
-  /// dependency, childMultiplicity, nameMode, name, onDelete, onUpdate, columnPairs
+  /// dependency, childMultiplicity, nameMode, name, onDelete, onUpdate, deferrable, columnPairs
   final Map<String, Object?> patch;
   final bool link;
 
@@ -244,6 +245,7 @@ class UpdateRelationshipCommand extends ModelCommand {
     if (patch['name'] is String) n.name = patch['name'] as String;
     n.onDelete = enumFromWire(RefAction.values, patch['onDelete']) ?? n.onDelete;
     n.onUpdate = enumFromWire(RefAction.values, patch['onUpdate']) ?? n.onUpdate;
+    n.deferrable = enumFromWire(Deferrable.values, patch['deferrable']) ?? n.deferrable;
     final cp = patch['columnPairs'];
     if (cp is List) {
       n.columnPairs = [

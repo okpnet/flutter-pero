@@ -116,7 +116,7 @@ void main() {
     final j = baseJson();
     (entity(j, 'orders')['columns'] as List)[2]['typeId'] = 'nothing';
     final r = load(j);
-    expect(r.model!.tables.firstWhere((t) => t.physicalName == 'orders').columns.length, 2);
+    expect(r.model!.tables.firstWhere((t) => t.physicalName == 'orders').columns.length, 3);
   });
 
   test('ダイアグラムが無ければ追加する', () {

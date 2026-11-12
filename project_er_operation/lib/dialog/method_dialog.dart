@@ -109,6 +109,54 @@ class _MethodDialogState extends State<_MethodDialog> {
     Navigator.pop(context, _work);
   }
 
+  /// 依存テーブル(8.1-3)。これらのテーブルの作成後にファンクションを出力する。
+  Widget _dependsOn(MethodDef cur) {
+    final tables = widget.model.entities.toList();
+    final selected = [
+      for (final id in cur.dependsOnTableIds)
+        if (tables.any((t) => t.id == id)) tables.firstWhere((t) => t.id == id)
+    ];
+    return Column(
+      key: ValueKey('dep${cur.id}${cur.dependsOnTableIds.length}'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 4),
+        const Text('依存テーブル・ビュー(作成後にこのファンクションを出力)'),
+        Wrap(spacing: 6, runSpacing: 4, children: [
+          for (final t in selected)
+            InputChip(
+              label: Text(t.physicalName, style: const TextStyle(fontSize: 11)),
+              onDeleted: () => setState(() => cur.dependsOnTableIds.remove(t.id)),
+            ),
+        ]),
+        Autocomplete<Entity>(
+          displayStringForOption: (t) => t.physicalName,
+          optionsBuilder: (v) {
+            final q = v.text.toLowerCase();
+            return tables
+                .where((t) =>
+                    !cur.dependsOnTableIds.contains(t.id) &&
+                    (q.isEmpty ||
+                        t.physicalName.toLowerCase().contains(q) ||
+                        t.logicalName.toLowerCase().contains(q)))
+                .take(30);
+          },
+          onSelected: (t) => setState(() => cur.dependsOnTableIds.add(t.id)),
+          fieldViewBuilder: (context, controller, focus, onSubmit) => TextField(
+            controller: controller,
+            focusNode: focus,
+            style: const TextStyle(fontSize: 13),
+            decoration: const InputDecoration(
+              labelText: 'テーブル・ビューを検索して追加',
+              isDense: true,
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final list = _work.where((m) => m.kind == _kind).toList();
@@ -166,6 +214,11 @@ class _MethodDialogState extends State<_MethodDialog> {
                         value: cur.external,
                         onChanged: (v) => setState(() => cur.external = v ?? false),
                       ),
+                    textField('コメント(COMMENT ON FUNCTION で出力)', cur.comment, (v) => cur.comment = v,
+                        key: ValueKey('mc${cur.id}'), multiline: true),
+                    textField('引数の定義(COMMENT ON FUNCTION 名前(引数) の括弧の内側)', cur.args, (v) => cur.args = v,
+                        key: ValueKey('ma${cur.id}')),
+                    if (cur.kind == MethodKind.function && !cur.external) _dependsOn(cur),
                     const SizedBox(height: 4),
                     Text(cur.kind == MethodKind.function ? '対象DBごとの呼出し式・本体' : '対象DBごとのトリガー本体'),
                     PerDbTabs(height: 330, entries: [

@@ -12,7 +12,7 @@ import 'diagram_painter.dart';
 import 'geometry.dart';
 
 /// サイドメニューからドロップする項目(3.3)。
-enum SideItem { table, joinView, functionView }
+enum SideItem { table, joinView, functionView, sqlView }
 
 /// キャンバスから呼び出す操作(右クリックメニューなど)。
 abstract class CanvasHost {
@@ -330,8 +330,12 @@ class DiagramCanvasState extends State<DiagramCanvas> {
         final target = _dragMoved ? _hitEntity(m) : null;
         _colDrag = null;
         _colRect = null;
-        if (src != null && col != null && target != null && target != src) {
-          widget.host.onConnectColumns(src, col, target, _rowAt(target, m)?.$1);
+        if (src != null && col != null && target != null) {
+          final row = _rowAt(target, m)?.$1;
+          // 同じテーブルへのドロップは自己参照。別の列行へのドロップのときだけ作る(3.4-9)。
+          if (target != src || (row != null && row != col)) {
+            widget.host.onConnectColumns(src, col, target, row);
+          }
         }
       case _Mode.marquee:
         final r = _marquee;
@@ -377,6 +381,8 @@ class DiagramCanvasState extends State<DiagramCanvas> {
             widget.host.onAddViewAt(m, ViewType.join);
           case SideItem.functionView:
             widget.host.onAddViewAt(m, ViewType.function);
+          case SideItem.sqlView:
+            widget.host.onAddViewAt(m, ViewType.sql);
         }
       },
       builder: (context, _, _) => LayoutBuilder(builder: (context, c) {

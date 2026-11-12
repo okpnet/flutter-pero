@@ -26,11 +26,13 @@ class GenerationService {
     String postScript, {
     required Duration timeout,
     String nameFormat = r'^[A-Za-z_][A-Za-z0-9_]*$',
+    PkNaming pkNaming = const PkNaming(),
+    bool dropBeforeCreate = false,
     void Function(String)? onLog,
   }) async {
-    final v = ModelValidator(model, nameFormat: nameFormat).validate();
+    final v = ModelValidator(model, nameFormat: nameFormat, pkNaming: pkNaming).validate();
     if (v.hasErrors) return GenerationOutcome.invalid(v.errors, v.warnings);
-    final json = GenerationJsonBuilder(model).buildText();
+    final json = GenerationJsonBuilder(model, pkNaming: pkNaming, dropBeforeCreate: dropBeforeCreate).buildText();
     final text = await runner.run(script: postScript, jsonText: json, timeout: timeout, onLog: onLog);
     return GenerationOutcome.ok(text, v.warnings);
   }

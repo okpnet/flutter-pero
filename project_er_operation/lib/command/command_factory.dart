@@ -71,6 +71,8 @@ ModelCommand commandFromJson(Map<String, Object?> json) {
           orientation: enumFromWire(Orientation.values, a['orientation']) ?? Orientation.landscape);
     case 'renameDiagram':
       return RenameDiagramCommand(a['id'] as int, a['name'] as String);
+    case 'setDiagramSchema':
+      return SetDiagramSchemaCommand(a['id'] as int, a['schema'] as String);
     case 'removeDiagram':
       return RemoveDiagramCommand(a['id'] as int);
     case 'moveDiagram':

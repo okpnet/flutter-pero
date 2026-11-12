@@ -123,9 +123,9 @@ class EntityLayouter {
       ];
     }
     final v = e as ViewEntity;
-    if (v.viewType == ViewType.function) {
+    if (v.viewType == ViewType.function || v.viewType == ViewType.sql) {
       return [
-        for (final c in v.function.columns)
+        for (final c in (v.viewType == ViewType.sql ? v.sql.columns : v.function.columns))
           EntityRow(
             texts: RowTexts(
                 logical: c.logicalName,
@@ -173,6 +173,8 @@ class EntityLayouter {
       case DefaultKind.method:
         final m = c.defaultMethodId == null ? null : model.methodById(c.defaultMethodId!);
         return m?.name ?? '';
+      case DefaultKind.expression:
+        return c.defaultExpression;
     }
   }
 

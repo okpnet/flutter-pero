@@ -60,7 +60,9 @@ class _TableListPanelState extends State<TableListPanel> {
                 ? m.expand(e).columns.length
                 : (e as ViewEntity).viewType == ViewType.function
                     ? e.function.columns.length
-                    : e.join.columns.length;
+                    : e.viewType == ViewType.sql
+                        ? e.sql.columns.length
+                        : e.join.columns.length;
             final selected = s.selection.contains(e.id);
             final color = placed ? theme.colorScheme.onSurface : theme.disabledColor;
             return InkWell(

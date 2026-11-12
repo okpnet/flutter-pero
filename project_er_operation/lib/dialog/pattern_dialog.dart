@@ -256,6 +256,7 @@ class _PatternDialogState extends State<_PatternDialog> {
                   DropdownMenuItem(value: DefaultKind.none, child: Text('なし')),
                   DropdownMenuItem(value: DefaultKind.value, child: Text('値')),
                   DropdownMenuItem(value: DefaultKind.method, child: Text('メソッド')),
+                  DropdownMenuItem(value: DefaultKind.expression, child: Text('式')),
                 ],
                 onChanged: (v) => setState(() => c.defaultKind = v ?? DefaultKind.none),
               ),
@@ -271,8 +272,11 @@ class _PatternDialogState extends State<_PatternDialog> {
                       items: [for (final m in methods) DropdownMenuItem(value: m.id, child: Text(m.name))],
                       onChanged: (v) => setState(() => c.defaultMethodId = v),
                     )
-                  : textField('値', c.defaultValue, (v) => c.defaultValue = v,
-                      key: ValueKey('dv${c.id}'), enabled: c.defaultKind == DefaultKind.value),
+                  : c.defaultKind == DefaultKind.expression
+                      ? textField('式(そのまま出力)', c.defaultExpression, (v) => c.defaultExpression = v,
+                          key: ValueKey('de${c.id}'))
+                      : textField('値', c.defaultValue, (v) => c.defaultValue = v,
+                          key: ValueKey('dv${c.id}'), enabled: c.defaultKind == DefaultKind.value),
             ),
           ]),
           textField('コメント', c.comment, (v) => c.comment = v, key: ValueKey('cc${c.id}')),

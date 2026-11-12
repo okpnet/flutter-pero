@@ -10,7 +10,11 @@ class MethodDef {
     this.external = false,
     Map<DbKind, String>? call,
     Map<DbKind, String>? bodies,
-  })  : call = call ?? {for (final d in DbKind.values) d: ''},
+    this.comment = '',
+    this.args = '',
+    List<int>? dependsOnTableIds,
+  })  : dependsOnTableIds = dependsOnTableIds ?? [],
+        call = call ?? {for (final d in DbKind.values) d: ''},
         bodies = bodies ?? {for (final d in DbKind.values) d: ''};
 
   final int id;
@@ -19,6 +23,15 @@ class MethodDef {
   bool external;
   Map<DbKind, String> call;
   Map<DbKind, String> bodies;
+
+  /// コメント(COMMENT ON FUNCTION で出力する。8.1-3)。
+  String comment;
+
+  /// 引数の定義(`COMMENT ON FUNCTION 名前(引数)` の括弧の内側。ファンクションのみ。8.1-3)。
+  String args;
+
+  /// 依存するテーブルのID。これらの作成後に定義を出力する(8.1-3)。
+  List<int> dependsOnTableIds;
 
   /// 対象DBの呼出し式。省略時は `{名前}()`(8.1-3)。
   String callExpr(DbKind db) {
@@ -32,7 +45,10 @@ class MethodDef {
       name: name,
       external: external,
       call: Map.of(call),
-      bodies: Map.of(bodies));
+      bodies: Map.of(bodies),
+      comment: comment,
+      args: args,
+      dependsOnTableIds: List.of(dependsOnTableIds));
 }
 
 /// 共通列パターン(8.2)。

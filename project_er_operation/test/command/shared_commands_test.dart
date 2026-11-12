@@ -20,7 +20,7 @@ void main() {
     expect(m.methods.map((x) => x.name), ['now_utc', 'new_fn']);
     expect(m.nextId, greaterThan(fresh.id));
     h.undo();
-    expect(m.methods.length, 2);
+    expect(m.methods.length, 3); // now_utc, touch, empty_string
     expect(m.tables.firstWhere((t) => t.physicalName == 'orders').triggers.length, 2);
   });
 

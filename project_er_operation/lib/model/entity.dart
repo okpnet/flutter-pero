@@ -15,6 +15,7 @@ class ColumnDef {
     this.defaultKind = DefaultKind.none,
     this.defaultValue = '',
     this.defaultMethodId,
+    this.defaultExpression = '',
     this.comment = '',
   });
 
@@ -30,6 +31,9 @@ class ColumnDef {
   DefaultKind defaultKind;
   String defaultValue;
   int? defaultMethodId;
+
+  /// デフォルトの種別が「式」のときの式(6.2-4)。そのまま出力する。
+  String defaultExpression;
   String comment;
 
   ColumnDef copy() => ColumnDef(
@@ -45,6 +49,7 @@ class ColumnDef {
         defaultKind: defaultKind,
         defaultValue: defaultValue,
         defaultMethodId: defaultMethodId,
+        defaultExpression: defaultExpression,
         comment: comment,
       );
 }
@@ -56,6 +61,7 @@ class ConstraintDef {
     this.nameMode = NameMode.auto,
     this.name = '',
     List<int>? columnIds,
+    this.nullsNotDistinct = false,
   }) : columnIds = columnIds ?? [];
 
   final int id;
@@ -63,8 +69,29 @@ class ConstraintDef {
   String name;
   List<int> columnIds;
 
-  ConstraintDef copy() =>
-      ConstraintDef(id: id, nameMode: nameMode, name: name, columnIds: List.of(columnIds));
+  /// ユニークのみ。NULLを同値として扱う(NULLS NOT DISTINCT。6.4-2)。
+  bool nullsNotDistinct;
+
+  ConstraintDef copy() => ConstraintDef(
+      id: id,
+      nameMode: nameMode,
+      name: name,
+      columnIds: List.of(columnIds),
+      nullsNotDistinct: nullsNotDistinct);
+}
+
+/// CHECK制約(6.4-5)。
+class CheckDef {
+  CheckDef({required this.id, this.nameMode = NameMode.auto, this.name = '', this.expression = ''});
+
+  final int id;
+  NameMode nameMode;
+  String name;
+
+  /// 検査式(括弧の内側)。そのまま出力する。
+  String expression;
+
+  CheckDef copy() => CheckDef(id: id, nameMode: nameMode, name: name, expression: expression);
 }
 
 /// トリガー(6.5)。
@@ -80,7 +107,10 @@ class TriggerDef {
     List<TriggerEvent>? events,
     this.forEach = TriggerForEach.row,
     this.when = '',
-  })  : inlineBodies = inlineBodies ?? {for (final d in DbKind.values) d: ''},
+    this.args = '',
+    List<int>? updateColumnIds,
+  })  : updateColumnIds = updateColumnIds ?? [],
+        inlineBodies = inlineBodies ?? {for (final d in DbKind.values) d: ''},
         events = events ?? [TriggerEvent.insert];
 
   final int id;
@@ -94,6 +124,12 @@ class TriggerDef {
   TriggerForEach forEach;
   String when;
 
+  /// トリガー関数へ渡す引数(`EXECUTE FUNCTION f(引数)` の括弧の内側。6.5-2)。
+  String args;
+
+  /// UPDATE を限定する列(`UPDATE OF 列...`)。空のときはテーブル全体の UPDATE(6.5-2)。
+  List<int> updateColumnIds;
+
   TriggerDef copy() => TriggerDef(
         id: id,
         source: source,
@@ -105,6 +141,8 @@ class TriggerDef {
         events: List.of(events),
         forEach: forEach,
         when: when,
+        args: args,
+        updateColumnIds: List.of(updateColumnIds),
       );
 }
 
@@ -152,15 +190,18 @@ class TableEntity extends Entity {
     List<ColumnDef>? columns,
     List<ConstraintDef>? indexes,
     List<ConstraintDef>? uniques,
+    List<CheckDef>? checks,
     List<TriggerDef>? triggers,
   })  : columns = columns ?? [],
         indexes = indexes ?? [],
         uniques = uniques ?? [],
+        checks = checks ?? [],
         triggers = triggers ?? [];
 
   List<ColumnDef> columns;
   List<ConstraintDef> indexes;
   List<ConstraintDef> uniques;
+  List<CheckDef> checks;
   List<TriggerDef> triggers;
 
   @override
@@ -187,6 +228,7 @@ class TableEntity extends Entity {
         columns: columns.map((c) => c.copy()).toList(),
         indexes: indexes.map((c) => c.copy()).toList(),
         uniques: uniques.map((c) => c.copy()).toList(),
+        checks: checks.map((c) => c.copy()).toList(),
         triggers: triggers.map((c) => c.copy()).toList(),
       );
 }
@@ -277,6 +319,17 @@ class ViewFunctionDef {
       columns: columns.map((c) => c.copy()).toList());
 }
 
+/// SQLビューの定義(6.6)。SELECT文をそのまま持つ。出力列は表示用に手入力する。
+class ViewSqlDef {
+  ViewSqlDef({this.sql = '', List<FunctionReturnColumn>? columns}) : columns = columns ?? [];
+
+  /// `CREATE VIEW 名前 AS` の後に出力するSELECT文(末尾の `;` は不要)。
+  String sql;
+  List<FunctionReturnColumn> columns;
+
+  ViewSqlDef copy() => ViewSqlDef(sql: sql, columns: columns.map((c) => c.copy()).toList());
+}
+
 class ViewEntity extends Entity {
   ViewEntity({
     required super.id,
@@ -289,12 +342,15 @@ class ViewEntity extends Entity {
     this.viewType = ViewType.join,
     ViewJoinDef? join,
     ViewFunctionDef? function,
+    ViewSqlDef? sql,
   })  : join = join ?? ViewJoinDef(),
-        function = function ?? ViewFunctionDef();
+        function = function ?? ViewFunctionDef(),
+        sql = sql ?? ViewSqlDef();
 
   ViewType viewType;
   ViewJoinDef join;
   ViewFunctionDef function;
+  ViewSqlDef sql;
 
   @override
   EntityKind get kind => EntityKind.view;
@@ -311,6 +367,7 @@ class ViewEntity extends Entity {
         viewType: viewType,
         join: join.copy(),
         function: function.copy(),
+        sql: sql.copy(),
       );
 }
 
@@ -336,6 +393,7 @@ class Relationship {
     this.name = '',
     this.onDelete = RefAction.noAction,
     this.onUpdate = RefAction.noAction,
+    this.deferrable = Deferrable.none,
   }) : columnPairs = columnPairs ?? [];
 
   final int id;
@@ -349,6 +407,9 @@ class Relationship {
   String name;
   RefAction onDelete;
   RefAction onUpdate;
+
+  /// 遅延可否(DEFERRABLE。7-4)。
+  Deferrable deferrable;
 
   /// 参照規則を適用しない(7-6-3)。
   bool get noReferentialRule => onDelete == RefAction.none && onUpdate == RefAction.none;
@@ -365,5 +426,6 @@ class Relationship {
         name: name,
         onDelete: onDelete,
         onUpdate: onUpdate,
+        deferrable: deferrable,
       );
 }

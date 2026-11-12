@@ -1,5 +1,24 @@
 import 'enums.dart';
 
+/// 複合型の項目(6.3-2)。
+class TypeField {
+  TypeField({
+    this.name = '',
+    this.typeId = 'integer',
+    this.length,
+    this.precision,
+    this.scale,
+  });
+  String name;
+  String typeId;
+  int? length;
+  int? precision;
+  int? scale;
+
+  TypeField copy() =>
+      TypeField(name: name, typeId: typeId, length: length, precision: precision, scale: scale);
+}
+
 /// 型の定義(6.3)。モデルに保存する。
 class DataType {
   DataType({
@@ -12,7 +31,12 @@ class DataType {
     this.category = TypeCategory.string,
     Map<DbKind, String>? physical,
     this.isStandard = false,
-  }) : physical = physical ?? {};
+    this.kind = TypeKind.scalar,
+    List<TypeField>? fields,
+    List<String>? enumValues,
+  })  : physical = physical ?? {},
+        fields = fields ?? [],
+        enumValues = enumValues ?? [];
 
   final String id;
   String displayName;
@@ -28,6 +52,17 @@ class DataType {
   /// 標準型は削除できない(6.3-3)。IDが付録Cに含まれるかで判定する。
   final bool isStandard;
 
+  /// 種別。ユーザー定義型(composite / enumeration)は、物理名テンプレートが型の名前になる。
+  TypeKind kind;
+
+  /// 複合型の項目(kind が composite のとき)。
+  List<TypeField> fields;
+
+  /// 列挙型の値(kind が enumeration のとき)。
+  List<String> enumValues;
+
+  bool get isUserDefined => kind != TypeKind.scalar;
+
   DataType copy() => DataType(
         id: id,
         displayName: displayName,
@@ -38,6 +73,9 @@ class DataType {
         category: category,
         physical: Map.of(physical),
         isStandard: isStandard,
+        kind: kind,
+        fields: fields.map((f) => f.copy()).toList(),
+        enumValues: List.of(enumValues),
       );
 
   /// テンプレートをパラメータ展開した物理型名。テンプレート未定義はnull。
@@ -107,6 +145,7 @@ List<DataType> standardTypes() {
     _t('time', 'time', d, 'time', 'TIME', 'time', 'TEXT'),
     _t('timestamp', 'timestamp', d, 'timestamp', 'DATETIME', 'datetime2', 'TEXT'),
     _t('timestamptz', 'timestamptz', d, 'timestamptz', 'TIMESTAMP', 'datetimeoffset', 'TEXT'),
+    _t('interval', 'interval', d, 'interval', 'TIME', 'time', 'TEXT'),
     _t('uuid', 'uuid', s, 'uuid', 'CHAR(36)', 'uniqueidentifier', 'TEXT'),
     _t('bytea', 'binary', TypeCategory.binary, 'bytea', 'BLOB', 'varbinary(max)', 'BLOB'),
     _t('json', 'json', TypeCategory.json, 'json', 'JSON', 'nvarchar(max)', 'TEXT'),

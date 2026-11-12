@@ -246,6 +246,19 @@ class _ModelProps extends StatelessWidget {
             onCommit: (v) => upd({'postPath': v}),
           ),
           _gap(),
+          _switch(
+            '出力にスキーマを含める',
+            p.includeSchema,
+            (v) => upd({'includeSchema': v}),
+          ),
+          _gap(8),
+          CommitTextField(
+            key: const ValueKey('schema'),
+            label: 'スキーマ(ダイアグラムのスキーマが空のときに使う)',
+            value: p.schema,
+            onCommit: (v) => upd({'schema': v}),
+          ),
+          _gap(),
           CommitTextField(
             key: const ValueKey('startQ'),
             label: '開始クエリ',
@@ -281,6 +294,13 @@ class _ModelProps extends StatelessWidget {
             return null;
           },
           onCommit: (v) => session.run(RenameDiagramCommand(d.id, v)),
+        ),
+        _gap(),
+        CommitTextField(
+          key: ValueKey('dsc${d.id}'),
+          label: 'スキーマ(空でモデルのスキーマ)',
+          value: d.schema,
+          onCommit: (v) => session.run(SetDiagramSchemaCommand(d.id, v)),
         ),
         _gap(),
         _dropdown<PageSize>(
@@ -536,6 +556,14 @@ class _TableProps extends StatelessWidget {
           enabled: !dis,
           nameOf: (c) => m.uniqueName(t, c),
           onChange: (f) => _edit((c) => f(c.uniques)),
+          nullsNotDistinctOption: true,
+        ),
+        _gap(24),
+        _ChecksEditor(
+          table: t,
+          session: session,
+          enabled: !dis,
+          onChange: (f) => _edit((c) => f(c.checks)),
         ),
       ],
     );
@@ -775,6 +803,7 @@ class _ColumnEditor extends StatelessWidget {
                 value: DefaultKind.method,
                 child: Text('メソッド'),
               ),
+              DropdownMenuItem(value: DefaultKind.expression, child: Text('式')),
             ],
             onChanged: enabled && !isAuto
                 ? (v) => onEdit((x) => x.defaultKind = v ?? DefaultKind.none)
@@ -806,6 +835,15 @@ class _ColumnEditor extends StatelessWidget {
                   onPressed: enabled ? onManageMethods : null,
                 ),
               ],
+            )
+          else if (c.defaultKind == DefaultKind.expression && !isAuto)
+            CommitTextField(
+              key: ValueKey('cde${c.id}'),
+              label: 'デフォルトの式(そのまま出力)',
+              value: c.defaultExpression,
+              enabled: enabled,
+              validator: (v) => v.trim().isEmpty ? '式は空にできません' : null,
+              onCommit: (v) => onEdit((x) => x.defaultExpression = v),
             )
           else
             CommitTextField(
@@ -868,7 +906,11 @@ class _ConstraintsEditor extends StatelessWidget {
     required this.enabled,
     required this.nameOf,
     required this.onChange,
+    this.nullsNotDistinctOption = false,
   });
+
+  /// ユニークのときtrue。NULLS NOT DISTINCT の切替を表示する(6.4-2)。
+  final bool nullsNotDistinctOption;
   final String title;
   final List<ConstraintDef> list;
   final TableEntity table;
@@ -968,6 +1010,17 @@ class _ConstraintsEditor extends StatelessWidget {
                       ),
                     ),
                   ],
+                  if (nullsNotDistinctOption) ...[
+                    _gap(),
+                    _switch(
+                      'NULLを同値として扱う(NULLS NOT DISTINCT)',
+                      c.nullsNotDistinct,
+                      enabled
+                          ? (v) => onChange(
+                              (l) => l.firstWhere((e) => e.id == c.id).nullsNotDistinct = v)
+                          : null,
+                    ),
+                  ],
                   _gap(),
                   Text('列', style: Theme.of(context).textTheme.bodySmall),
                   _gap(4),
@@ -997,6 +1050,111 @@ class _ConstraintsEditor extends StatelessWidget {
                               : null,
                         ),
                     ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// CHECK制約(6.4-5)。
+class _ChecksEditor extends StatelessWidget {
+  const _ChecksEditor({
+    required this.table,
+    required this.session,
+    required this.enabled,
+    required this.onChange,
+  });
+  final TableEntity table;
+  final EditorSession session;
+  final bool enabled;
+  final void Function(void Function(List<CheckDef> l) f) onChange;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = session.model;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(child: Text('CHECK制約', style: Theme.of(context).textTheme.titleSmall)),
+            FilledButton.tonalIcon(
+              onPressed: enabled
+                  ? () => onChange((l) => l.add(CheckDef(id: m.allocateId())))
+                  : null,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('追加'),
+            ),
+          ],
+        ),
+        _gap(8),
+        for (final c in table.checks)
+          Card(
+            margin: const EdgeInsets.symmetric(vertical: 4),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(m.checkName(table, c),
+                            style: const TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                      IconButton(
+                        tooltip: '削除',
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        onPressed: enabled
+                            ? () => onChange((l) => l.removeWhere((e) => e.id == c.id))
+                            : null,
+                      ),
+                    ],
+                  ),
+                  _dropdown<NameMode>(
+                    key: ValueKey('ckm${c.id}${c.nameMode}'),
+                    label: '名前の決め方',
+                    value: c.nameMode,
+                    items: const [
+                      DropdownMenuItem(value: NameMode.auto, child: Text('自動')),
+                      DropdownMenuItem(value: NameMode.manual, child: Text('手動')),
+                    ],
+                    onChanged: enabled
+                        ? (v) => onChange((l) {
+                              final x = l.firstWhere((e) => e.id == c.id);
+                              x.nameMode = v ?? NameMode.auto;
+                              if (x.nameMode == NameMode.manual && x.name.isEmpty) {
+                                x.name = m.checkName(table, c);
+                              }
+                            })
+                        : null,
+                  ),
+                  if (c.nameMode == NameMode.manual) ...[
+                    _gap(),
+                    CommitTextField(
+                      key: ValueKey('ckn${c.id}'),
+                      label: '制約名',
+                      value: c.name,
+                      enabled: enabled,
+                      validator: (v) => v.isEmpty ? '制約名は必須です' : null,
+                      onCommit: (v) =>
+                          onChange((l) => l.firstWhere((e) => e.id == c.id).name = v),
+                    ),
+                  ],
+                  _gap(),
+                  CommitTextField(
+                    key: ValueKey('cke${c.id}'),
+                    label: '検査式(括弧の内側)',
+                    value: c.expression,
+                    enabled: enabled,
+                    multiline: true,
+                    validator: (v) => v.trim().isEmpty ? '検査式は必須です' : null,
+                    onCommit: (v) =>
+                        onChange((l) => l.firstWhere((e) => e.id == c.id).expression = v),
                   ),
                 ],
               ),
@@ -1039,7 +1197,7 @@ class _ViewProps extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: switch (tab) {
         0 => [
-          _hint(context, 'ビュー(${v.viewType == ViewType.join ? '結合' : '関数'})'),
+          _hint(context, 'ビュー(${switch (v.viewType) { ViewType.join => '結合', ViewType.function => '関数', ViewType.sql => 'SQL' }})'),
           _gap(),
           CommitTextField(
             key: ValueKey('vl$id'),
@@ -1072,7 +1230,7 @@ class _ViewProps extends StatelessWidget {
         ],
         1 => [
           Text(
-            '定義: ${v.viewType == ViewType.join ? 'ソース${v.join.sources.length}件 / 出力列${v.join.columns.length}件' : '戻り列${v.function.columns.length}件'}',
+            '定義: ${switch (v.viewType) { ViewType.join => 'ソース${v.join.sources.length}件 / 出力列${v.join.columns.length}件', ViewType.function => '戻り列${v.function.columns.length}件', ViewType.sql => 'SQL ${v.sql.sql.length}文字 / 列${v.sql.columns.length}件' }}',
           ),
           _gap(),
           Align(
@@ -1303,6 +1461,26 @@ class _RelationshipProps extends StatelessWidget {
             ),
             _gap(),
           ],
+          _dropdown<Deferrable>(
+            key: ValueKey('dfr$id${r.deferrable}'),
+            label: '遅延可否(DEFERRABLE)',
+            value: r.deferrable,
+            items: const [
+              DropdownMenuItem(value: Deferrable.none, child: Text('指定しない')),
+              DropdownMenuItem(
+                value: Deferrable.immediate,
+                child: Text('DEFERRABLE INITIALLY IMMEDIATE'),
+              ),
+              DropdownMenuItem(
+                value: Deferrable.deferred,
+                child: Text('DEFERRABLE INITIALLY DEFERRED'),
+              ),
+            ],
+            onChanged: dis
+                ? null
+                : (v) => _update(context, r, {'deferrable': v!.wire}),
+          ),
+          _gap(),
         ],
       },
     );

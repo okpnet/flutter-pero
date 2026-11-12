@@ -44,6 +44,95 @@ void main() {
   Finder field(String label) => find.widgetWithText(TextField, label).first;
   TableEntity cur() => session.model.tableById(t.id)!;
 
+  testWidgets('モデルのスキーマと「出力にスキーマを含める」、ダイアグラムのスキーマを編集できる(5.1-2、5.2-1)', (tester) async {
+    await pumpPanel(tester);
+    await tester.enterText(find.widgetWithText(TextField, 'スキーマ(ダイアグラムのスキーマが空のときに使う)'), 'app');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(session.model.properties.schema, 'app');
+    await tester.tap(find.widgetWithText(SwitchListTile, '出力にスキーマを含める'));
+    await tester.pump();
+    expect(session.model.properties.includeSchema, isTrue);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'ダイアグラム'));
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextField, 'スキーマ(空でモデルのスキーマ)'), 'sales');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(session.model.diagrams.first.schema, 'sales');
+    session.undo();
+    await tester.pump();
+    expect(session.model.diagrams.first.schema, '');
+  });
+
+  testWidgets('列のデフォルトに「式」を選べる(6.2-4)', (tester) async {
+    session.setSelection([t.id]);
+    await pumpPanel(tester);
+    await tester.tap(find.widgetWithText(ChoiceChip, '列'));
+    await tester.pump();
+    final name = cur().columns[1];
+    await tester.tap(find.text('name').first); // 列カードを開く
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('cdk${name.id}${name.defaultKind}false')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('式').last);
+    await tester.pumpAndSettle();
+    expect(cur().columns[1].defaultKind, DefaultKind.expression);
+    await tester.enterText(find.byKey(ValueKey('cde${name.id}')), "'x' || 'y'");
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(cur().columns[1].defaultExpression, "'x' || 'y'");
+  });
+
+  testWidgets('制約タブ: CHECK制約を追加し、ユニークにNULLS NOT DISTINCTを設定できる(6.4)', (tester) async {
+    cur().uniques.add(ConstraintDef(id: session.model.allocateId(), columnIds: [cur().columns[1].id]));
+    session.setSelection([t.id]);
+    await pumpPanel(tester);
+    await tester.tap(find.widgetWithText(ChoiceChip, '制約'));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(SwitchListTile, 'NULLを同値として扱う(NULLS NOT DISTINCT)'));
+    await tester.pump();
+    expect(cur().uniques.single.nullsNotDistinct, isTrue);
+    final addCheck = find.widgetWithText(FilledButton, '追加').last;
+    await tester.ensureVisible(addCheck);
+    await tester.tap(addCheck);
+    await tester.pump();
+    expect(cur().checks.length, 1);
+    expect(find.text('users_ck1'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextField, '検査式(括弧の内側)'), 'id > 0');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(cur().checks.single.expression, 'id > 0');
+  });
+
+  testWidgets('トリガー: 引数とUPDATEの対象(指定した列)を設定できる(6.5-2)', (tester) async {
+    cur().triggers.add(TriggerDef(
+        id: session.model.allocateId(),
+        events: [TriggerEvent.insert, TriggerEvent.update],
+        inlineBodies: {DbKind.postgresql: 'CREATE FUNCTION {{trigger}}() ...'}));
+    session.setSelection([t.id]);
+    await pumpPanel(tester);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'トリガー'));
+    await tester.pump();
+    await tester.tap(find.textContaining('users_trg01'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, "関数への引数(例: '80', 1)"), "'80'");
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(cur().triggers.single.args, "'80'");
+    final target = find.byKey(ValueKey('tuc${cur().triggers.single.id}false'));
+    await tester.ensureVisible(target);
+    await tester.tap(target);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('指定した列(UPDATE OF)').last);
+    await tester.pumpAndSettle();
+    expect(cur().triggers.single.updateColumnIds, [cur().columns.first.id]);
+    final chip = find.widgetWithText(FilterChip, 'name');
+    await tester.ensureVisible(chip);
+    await tester.tap(chip);
+    await tester.pump();
+    expect(cur().triggers.single.updateColumnIds.length, 2);
+  });
+
   testWidgets('何も選択していないときは、モデルとダイアグラムのタブでプロパティを表示する', (tester) async {
     await pumpPanel(tester);
     expect(find.widgetWithText(ChoiceChip, 'モデル'), findsOneWidget);

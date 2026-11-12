@@ -215,13 +215,24 @@ class DiagramPainter extends CustomPainter {
         ..color = selected ? colors.selection : colors.relationshipLine
         ..style = PaintingStyle.stroke
         ..strokeWidth = (selected ? 2.0 : 1.2);
-      canvas.drawLine(s.from, s.to, paint);
+      final route = s.route;
+      if (route != null) {
+        for (var i = 1; i < route.length; i++) {
+          canvas.drawLine(route[i - 1], route[i], paint);
+        }
+      } else {
+        canvas.drawLine(s.from, s.to, paint);
+      }
       final r = s.relationship;
       // 親側 / 子側の記号
       final parentEnd = s.fromIsParent ? s.from : s.to;
-      final parentDir = s.fromIsParent ? (s.to - s.from) : (s.from - s.to);
+      final parentDir = route != null
+          ? route[1] - route[0]
+          : (s.fromIsParent ? (s.to - s.from) : (s.from - s.to));
       final childEnd = s.fromIsParent ? s.to : s.from;
-      final childDir = s.fromIsParent ? (s.from - s.to) : (s.to - s.from);
+      final childDir = route != null
+          ? route[route.length - 2] - route.last
+          : (s.fromIsParent ? (s.from - s.to) : (s.to - s.from));
       if (s.bothPlaced || s.fromIsParent) {
         _parentSymbol(canvas, paint, parentEnd, parentDir, r.dependency);
       }

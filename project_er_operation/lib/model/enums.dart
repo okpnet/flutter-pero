@@ -36,7 +36,8 @@ enum TypeCategory {
 enum DefaultKind {
   none('none'),
   value('value'),
-  method('method');
+  method('method'),
+  expression('expression');
 
   const DefaultKind(this.wire);
   final String wire;
@@ -60,7 +61,8 @@ enum MethodKind {
 
 enum ViewType {
   join('join'),
-  function('function');
+  function('function'),
+  sql('sql');
 
   const ViewType(this.wire);
   final String wire;
@@ -174,4 +176,25 @@ T? enumFromWire<T extends Enum>(List<T> values, Object? wire) {
     if ((v as dynamic).wire == wire) return v;
   }
   return null;
+}
+
+/// 型の種別(6.3)。標準型とカスタム型は scalar、ユーザー定義型は composite / enumeration。
+enum TypeKind {
+  scalar('scalar'),
+  composite('composite'),
+  enumeration('enumeration');
+
+  const TypeKind(this.wire);
+  final String wire;
+}
+
+/// 外部キー制約の遅延可否(7-4)。
+enum Deferrable {
+  none('none', null),
+  immediate('immediate', 'DEFERRABLE INITIALLY IMMEDIATE'),
+  deferred('deferred', 'DEFERRABLE INITIALLY DEFERRED');
+
+  const Deferrable(this.wire, this.sql);
+  final String wire;
+  final String? sql;
 }

@@ -24,6 +24,7 @@ void main() {
     expect(s.recentFileCount, 10);
     expect((s.postFile, s.postTimeoutSeconds), ('postgresql.post', 30));
     expect((s.generatedExtension, s.crlf), ('sql', true));
+    expect((s.pkPrefix, s.pkSuffix, s.dropBeforeCreate), ('', '_pk', false));
     expect((s.paperSize, s.orientation, s.dpi), (PageSize.a3, Orientation.landscape, 300));
     expect((s.alignSpace, s.gridSnap, s.undoLimit), (40, 10, 100));
     expect((s.fontSize, s.headerScale, s.normalScale, s.supplementScale), (12, 1.2, 1.0, 0.8));
@@ -39,6 +40,9 @@ void main() {
       ..dpi = 150
       ..theme = ThemeChoice.dark
       ..colComment = true
+      ..pkPrefix = 'p_'
+      ..pkSuffix = '_pkc'
+      ..dropBeforeCreate = true
       ..recentFiles = ['a.pero', 'b.pero']
       ..windowWidth = 1500
       ..rightPaneRatio = 0.3;

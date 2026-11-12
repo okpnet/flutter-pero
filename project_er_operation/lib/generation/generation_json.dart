@@ -3,12 +3,22 @@ import 'dart:convert';
 import '../model/model.dart';
 
 /// 生成用JSON(付録B)のバージョン。付録Bを変更するときに上げる。
-const int postApiVersion = 1;
+const int postApiVersion = 2;
 
 /// 生成用JSONを作る。生成前検証(9.5)のエラーがないモデルを前提とする。
 class GenerationJsonBuilder {
-  GenerationJsonBuilder(this.model);
+  GenerationJsonBuilder(
+    this.model, {
+    this.pkNaming = const PkNaming(),
+    this.dropBeforeCreate = false,
+  });
   final ErModel model;
+
+  /// 主キー制約名の規則(設定。6.4-1)。
+  final PkNaming pkNaming;
+
+  /// 再実行用のDROP文を付ける(設定。9.6-7)。
+  final bool dropBeforeCreate;
 
   late final DbKind _db = model.properties.targetDb;
 
@@ -26,7 +36,10 @@ class GenerationJsonBuilder {
         'outputFileName': model.properties.outputFileName,
         'startQuery': model.properties.startQuery,
         'endQuery': model.properties.endQuery,
+        'dropBeforeCreate': dropBeforeCreate,
       },
+      'schemas': _schemas(),
+      'userTypes': _userTypes(),
       'methods': [
         for (final m in model.methods)
           {
@@ -36,6 +49,10 @@ class GenerationJsonBuilder {
             'external': m.external,
             'call': m.kind == MethodKind.function ? m.callExpr(_db) : '',
             'body': m.bodies[_db] ?? '',
+            'comment': m.comment,
+            'args': m.args,
+            'afterTableId': m.kind == MethodKind.function ? _afterTable(m, ordered) : null,
+            'afterViewId': m.kind == MethodKind.function ? _afterView(m) : null,
           }
       ],
       'tables': [for (final t in ordered) _table(t)],
@@ -47,6 +64,82 @@ class GenerationJsonBuilder {
         for (final v in (model.views.toList()..sort((a, b) => a.id.compareTo(b.id)))) _view(v)
       ],
     };
+  }
+
+  /// 出力に使うスキーマの一覧(重複なし。出力にスキーマを含めるときのみ)。
+  List<String> _schemas() {
+    final out = <String>[];
+    for (final e in model.entities) {
+      final s = model.schemaOf(e);
+      if (s.isNotEmpty && !out.contains(s)) out.add(s);
+    }
+    return out;
+  }
+
+  /// ユーザー定義型(複合型、列挙型)。使われる型が先になる順。対象DBの物理名があるものだけ。
+  List<Map<String, Object?>> _userTypes() {
+    final out = <Map<String, Object?>>[];
+    final done = <String>{};
+    void visit(DataType t) {
+      if (!done.add(t.id)) return;
+      for (final f in t.fields) {
+        final d = model.typeById(f.typeId);
+        if (d != null && d.isUserDefined) visit(d);
+      }
+      final name = t.physical[_db] ?? '';
+      if (name.isEmpty) return;
+      out.add({
+        'name': name,
+        'kind': t.kind.wire,
+        'fields': [
+          for (final f in t.fields)
+            {
+              'name': f.name,
+              'type': model.typeById(f.typeId)?.expand(_db,
+                      length: f.length, precision: f.precision, scale: f.scale) ??
+                  '',
+            }
+        ],
+        'values': t.enumValues,
+      });
+    }
+
+    for (final t in model.types.where((t) => t.isUserDefined)) {
+      visit(t);
+    }
+    return out;
+  }
+
+  /// ファンクションを出力する位置(ビュー)。依存にビューがあるとき、最後に作成されるビューのID(8.1-3)。
+  /// ビューはテーブルの後に作成されるため、ビューへの依存があれば、テーブルへの位置より優先する。
+  int? _afterView(MethodDef m) {
+    final views = (model.views.toList()..sort((a, b) => a.id.compareTo(b.id)));
+    int? best;
+    var bestPos = -1;
+    for (final id in m.dependsOnTableIds) {
+      final pos = views.indexWhere((v) => v.id == id);
+      if (pos > bestPos) {
+        bestPos = pos;
+        best = id;
+      }
+    }
+    return best;
+  }
+
+  /// ファンクションを出力する位置。依存テーブルのうち、最後に作成されるテーブルのID(8.1-3)。
+  /// ビューへの依存があるときはnull(ビューの後に出力する)。
+  int? _afterTable(MethodDef m, List<TableEntity> ordered) {
+    if (_afterView(m) != null) return null;
+    int? best;
+    var bestPos = -1;
+    for (final id in m.dependsOnTableIds) {
+      final pos = ordered.indexWhere((t) => t.id == id);
+      if (pos > bestPos) {
+        bestPos = pos;
+        best = id;
+      }
+    }
+    return best;
   }
 
   /// 親から子の順(トポロジカル順)。循環を作る外部キーは [deferred] に入れる(9.6-3)。
@@ -108,6 +201,7 @@ class GenerationJsonBuilder {
         'kind': c.defaultKind.wire,
         'value': c.defaultKind == DefaultKind.value ? c.defaultValue : '',
         'call': call,
+        'expression': c.defaultKind == DefaultKind.expression ? c.defaultExpression : '',
       },
     };
   }
@@ -122,6 +216,7 @@ class GenerationJsonBuilder {
     final pk = t.primaryKeyColumns;
     return {
       'id': t.id,
+      'schema': model.schemaOf(t),
       'logicalName': t.logicalName,
       'physicalName': t.physicalName,
       'comment': t.comment,
@@ -130,14 +225,24 @@ class GenerationJsonBuilder {
       'columns': [for (final x in cols) _column(x)],
       'primaryKey': pk.isEmpty
           ? null
-          : {'name': model.primaryKeyName(t), 'columns': pk.map((c) => c.physicalName).toList()},
+          : {
+              'name': model.primaryKeyName(t, pkNaming),
+              'columns': pk.map((c) => c.physicalName).toList()
+            },
       'indexes': [
         for (final c in t.indexes)
           {'name': model.indexName(t, c), 'columns': names(c.columnIds)}
       ],
       'uniques': [
         for (final c in t.uniques)
-          {'name': model.uniqueName(t, c), 'columns': names(c.columnIds)}
+          {
+            'name': model.uniqueName(t, c),
+            'columns': names(c.columnIds),
+            'nullsNotDistinct': c.nullsNotDistinct,
+          }
+      ],
+      'checks': [
+        for (final c in t.checks) {'name': model.checkName(t, c), 'expression': c.expression}
       ],
       'triggers': [
         for (var i = 0; i < t.triggers.length; i++) _trigger(t, t.triggers[i], i + 1)
@@ -158,6 +263,11 @@ class GenerationJsonBuilder {
       'events': g.events.map((e) => e.wire).toList(),
       'forEach': g.forEach.wire,
       'when': g.when,
+      'args': g.args,
+      'updateColumns': [
+        for (final id in g.updateColumnIds)
+          model.findExpandedColumn(t, id)?.column.physicalName ?? ''
+      ],
       'methodName': m?.name,
       'body': raw.replaceAll('{{table}}', t.physicalName).replaceAll('{{trigger}}', name),
     };
@@ -171,7 +281,9 @@ class GenerationJsonBuilder {
       'id': r.id,
       'name': model.foreignKeyName(r),
       'childTable': c.physicalName,
+      'childSchema': model.schemaOf(c),
       'parentTable': p.physicalName,
+      'parentSchema': model.schemaOf(p),
       'columns': [
         for (final pair in r.columnPairs)
           {
@@ -181,6 +293,7 @@ class GenerationJsonBuilder {
       ],
       'onDelete': r.onDelete.sql,
       'onUpdate': r.onUpdate.sql,
+      'deferrable': r.deferrable.sql,
       'deferred': deferred,
     };
   }
@@ -188,6 +301,7 @@ class GenerationJsonBuilder {
   Map<String, Object?> _view(ViewEntity v) {
     final base = <String, Object?>{
       'id': v.id,
+      'schema': model.schemaOf(v),
       'logicalName': v.logicalName,
       'physicalName': v.physicalName,
       'comment': v.comment,
@@ -203,6 +317,7 @@ class GenerationJsonBuilder {
         'joins': <Object?>[],
         'columns': <Object?>[],
         'where': '',
+        'sql': null,
         'function': {
           'name': m?.name ?? '',
           'args': v.function.args,
@@ -219,6 +334,17 @@ class GenerationJsonBuilder {
         },
       };
     }
+    if (v.viewType == ViewType.sql) {
+      return {
+        ...base,
+        'from': null,
+        'joins': <Object?>[],
+        'columns': <Object?>[],
+        'where': '',
+        'function': null,
+        'sql': v.sql.sql,
+      };
+    }
     final j = v.join;
     TableEntity? tableOf(String alias) {
       final s = j.sources.where((x) => x.alias == alias).firstOrNull;
@@ -233,12 +359,17 @@ class GenerationJsonBuilder {
     final first = j.sources.first;
     return {
       ...base,
-      'from': {'table': model.tableById(first.entityId)?.physicalName ?? '', 'alias': first.alias},
+      'from': {
+        'table': model.tableById(first.entityId)?.physicalName ?? '',
+        'schema': _schemaOfId(first.entityId),
+        'alias': first.alias
+      },
       'joins': [
         for (final s in j.sources.skip(1))
           {
             'type': s.joinType.wire,
             'table': model.tableById(s.entityId)?.physicalName ?? '',
+            'schema': _schemaOfId(s.entityId),
             'alias': s.alias,
             'on': [
               for (final o in s.on)
@@ -258,6 +389,12 @@ class GenerationJsonBuilder {
       ],
       'where': j.where,
       'function': null,
+      'sql': null,
     };
+  }
+
+  String _schemaOfId(int entityId) {
+    final e = model.entityById(entityId);
+    return e == null ? '' : model.schemaOf(e);
   }
 }

@@ -73,11 +73,30 @@ void main() {
       expect(created.physicalName, 'customer_id_2');
     });
 
-    test('ロック中のテーブル、自己参照、親に鍵がない場合は追加できない', () {
+    test('自己参照のリレーションシップ: 外部キー列は親の鍵の列とは別に作り、依存関係は無効', () {
+      final m = ErModel.empty();
+      final t = table(m, 'node', [col(m, 'id', 'auto', pk: true)]);
+      final h = historyOf(m);
+      expect(relationshipAddBlocker(m, t, t), isNull);
+      final cmd = AddRelationshipCommand(tableAId: t.id, tableBId: t.id);
+      h.execute(cmd);
+      final r = m.relationshipById(cmd.createdId!)!;
+      expect((r.parentId, r.childId), (t.id, t.id));
+      expect(r.dependency, isFalse);
+      final fk = t.columnById(r.columnPairs.single.childColumnId)!;
+      expect(fk.id, isNot(t.columns.first.id));
+      expect(fk.physicalName, 'node_id');
+      expect(fk.pk, isFalse);
+      expect(fk.notNull, isFalse);
+      h.undo();
+      expect(m.relationships, isEmpty);
+      expect(m.tableById(t.id)!.columns.length, 1);
+    });
+
+    test('ロック中のテーブル、親に鍵がない場合は追加できない', () {
       final m = ErModel.empty();
       final a = table(m, 'a', [col(m, 'id', 'auto', pk: true)]);
       final b = table(m, 'b', [col(m, 'x', 'integer')]);
-      expect(relationshipAddBlocker(m, a, a), isNotNull);
       expect(relationshipAddBlocker(m, a, b), isNull);
       expect(relationshipAddBlocker(m, b, a), isNull);
       final c = table(m, 'c', [col(m, 'x', 'integer')]); // 鍵なし。IDが小さい方(b)が親

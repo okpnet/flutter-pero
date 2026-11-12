@@ -286,6 +286,9 @@ class DeleteEntitiesCommand extends ModelCommand {
     if (problems.isNotEmpty) throw CommandException(problems.first);
     m.relationships.removeWhere((r) => ids.contains(r.parentId) || ids.contains(r.childId));
     m.entities.removeWhere((e) => ids.contains(e.id));
+    for (final x in m.methods) {
+      x.dependsOnTableIds.removeWhere(ids.contains);
+    }
     for (final d in m.diagrams) {
       d.placements.removeWhere((p) => ids.contains(p.entityId));
       ctx.recalcPages(d);

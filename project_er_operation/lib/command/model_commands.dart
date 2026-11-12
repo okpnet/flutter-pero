@@ -51,6 +51,25 @@ class RenameDiagramCommand extends ModelCommand {
   }
 }
 
+/// ダイアグラムのスキーマの変更(5.2-1)。
+class SetDiagramSchemaCommand extends ModelCommand {
+  SetDiagramSchemaCommand(this.id, this.schema);
+  final int id;
+  final String schema;
+
+  @override
+  String get type => 'setDiagramSchema';
+  @override
+  Map<String, Object?> argsToJson() => {'id': id, 'schema': schema};
+
+  @override
+  void apply(CommandContext ctx) {
+    final d = ctx.model.diagramById(id);
+    if (d == null) throw CommandException('ダイアグラムが存在しません');
+    d.schema = schema;
+  }
+}
+
 /// ダイアグラムの削除。削除されるのは配置だけ(3.2-4)。最後の1つは削除できない。
 class RemoveDiagramCommand extends ModelCommand {
   RemoveDiagramCommand(this.id);
@@ -119,7 +138,7 @@ class UpdateDiagramPageCommand extends ModelCommand {
 class UpdateModelPropertiesCommand extends ModelCommand {
   UpdateModelPropertiesCommand(this.patch);
 
-  /// outputFileName, outputFolder, targetDb, postPath, startQuery, endQuery
+  /// outputFileName, outputFolder, targetDb, postPath, startQuery, endQuery, schema, includeSchema
   final Map<String, Object?> patch;
 
   @override
@@ -132,6 +151,8 @@ class UpdateModelPropertiesCommand extends ModelCommand {
     final p = ctx.model.properties;
     String? s(String k) => patch[k] is String ? patch[k] as String : null;
     p.outputFileName = s('outputFileName') ?? p.outputFileName;
+    p.schema = s('schema') ?? p.schema;
+    if (patch['includeSchema'] is bool) p.includeSchema = patch['includeSchema'] as bool;
     p.outputFolder = s('outputFolder') ?? p.outputFolder;
     p.postPath = s('postPath') ?? p.postPath;
     p.startQuery = s('startQuery') ?? p.startQuery;
@@ -223,6 +244,10 @@ class DeleteTypeCommand extends ModelCommand {
     }
     for (final v in m.views) {
       n += v.function.columns.where((c) => c.typeId == typeId).length;
+      n += v.sql.columns.where((c) => c.typeId == typeId).length;
+    }
+    for (final t in m.types) {
+      n += t.fields.where((f) => f.typeId == typeId).length;
     }
     return n;
   }
@@ -254,8 +279,13 @@ class DeleteTypeCommand extends ModelCommand {
         }
       }
       for (final v in m.views) {
-        for (final c in v.function.columns) {
+        for (final c in [...v.function.columns, ...v.sql.columns]) {
           if (c.typeId == typeId) c.typeId = replacementId;
+        }
+      }
+      for (final x in m.types) {
+        for (final f in x.fields) {
+          if (f.typeId == typeId) f.typeId = replacementId;
         }
       }
     }

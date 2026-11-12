@@ -28,6 +28,9 @@ class AppSettings {
   // 生成
   String generatedExtension = 'sql';
   bool crlf = true;
+  String pkPrefix = '';
+  String pkSuffix = '_pk';
+  bool dropBeforeCreate = false;
   // キャンバス
   PageSize paperSize = PageSize.a3;
   Orientation orientation = Orientation.landscape;
@@ -64,6 +67,8 @@ class AppSettings {
   String lastFolder = '';
   List<String> recentFiles = [];
 
+  PkNaming get pkNaming => PkNaming(prefix: pkPrefix, suffix: pkSuffix);
+
   DisplayOptions get displayOptions => DisplayOptions(
         headerLogical: headerLogical,
         headerPhysical: headerPhysical,
@@ -90,7 +95,13 @@ class AppSettings {
         },
         'file': {'recentFileCount': recentFileCount},
         'post': {'folder': postFolder, 'file': postFile, 'timeoutSeconds': postTimeoutSeconds},
-        'generation': {'extension': generatedExtension, 'crlf': crlf},
+        'generation': {
+          'extension': generatedExtension,
+          'crlf': crlf,
+          'pkPrefix': pkPrefix,
+          'pkSuffix': pkSuffix,
+          'dropBeforeCreate': dropBeforeCreate,
+        },
         'canvas': {
           'paperSize': paperSize.wire,
           'orientation': orientation.wire,
@@ -163,6 +174,9 @@ class AppSettings {
     final g = sec('generation');
     s.generatedExtension = str(g, 'extension', s.generatedExtension);
     s.crlf = b(g, 'crlf', s.crlf);
+    s.pkPrefix = str(g, 'pkPrefix', s.pkPrefix);
+    s.pkSuffix = str(g, 'pkSuffix', s.pkSuffix);
+    s.dropBeforeCreate = b(g, 'dropBeforeCreate', s.dropBeforeCreate);
     final c = sec('canvas');
     s.paperSize = enumFromWire(PageSize.values, c['paperSize']) ?? s.paperSize;
     s.orientation = enumFromWire(Orientation.values, c['orientation']) ?? s.orientation;

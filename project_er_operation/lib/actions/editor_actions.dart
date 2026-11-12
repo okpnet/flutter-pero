@@ -195,6 +195,10 @@ class EditorActions implements CanvasHost {
       addFunctionView(modelPos);
       return;
     }
+    if (type == ViewType.sql) {
+      addSqlView(modelPos);
+      return;
+    }
     addJoinView(modelPos);
   }
 
@@ -235,6 +239,17 @@ class EditorActions implements CanvasHost {
     if (session.run(cmd)) session.setSelection([cmd.createdId!]);
   }
 
+  Future<void> addSqlView(Offset modelPos) async {
+    final v = await showSqlViewDialog(_ctx, session.model, nameFormat: session.settings.nameFormat);
+    if (v == null) return;
+    final cmd = AddViewCommand(
+        diagramId: session.diagram.id,
+        x: _snap(modelPos.dx),
+        y: _snap(modelPos.dy),
+        entityMap: PeroEncoder.entityToMap(v));
+    if (session.run(cmd)) session.setSelection([cmd.createdId!]);
+  }
+
   Future<void> addJoinView(Offset modelPos) async {
     if (session.model.tables.isEmpty) {
       await showMessageDialog(_ctx, title: 'ビューの追加', message: 'ソースにするテーブルがありません。先にテーブルを追加してください。');
@@ -255,6 +270,12 @@ class EditorActions implements CanvasHost {
     if (e is! ViewEntity) return;
     if (e.viewType == ViewType.join) {
       final v = await showJoinViewDialog(_ctx, session.model, nameFormat: session.settings.nameFormat, initial: e);
+      if (v != null) session.run(ReplaceEntityCommand.of(v));
+      return;
+    }
+    if (e.viewType == ViewType.sql) {
+      final v = await showSqlViewDialog(_ctx, session.model,
+          nameFormat: session.settings.nameFormat, initial: e);
       if (v != null) session.run(ReplaceEntityCommand.of(v));
       return;
     }
@@ -339,8 +360,11 @@ class EditorActions implements CanvasHost {
   /// テーブルがちょうど2つ選択されているときの追加の可否(4.2-5)。
   String? addRelationshipBlocker() {
     final tables = _selectedEntityIds.map(session.model.tableById).whereType<TableEntity>().toList();
-    if (_selectedEntityIds.length != 2 || tables.length != 2) return '追加するにはテーブルを2つ選択してください';
-    return relationshipAddBlocker(session.model, tables[0], tables[1]);
+    final n = _selectedEntityIds.length;
+    if ((n != 1 && n != 2) || tables.length != n) {
+      return '追加するにはテーブルを1つ(自己参照)または2つ選択してください';
+    }
+    return relationshipAddBlocker(session.model, tables[0], tables.last);
   }
 
   bool get canAddRelationship => addRelationshipBlocker() == null;
@@ -352,7 +376,7 @@ class EditorActions implements CanvasHost {
       return;
     }
     final ids = _selectedEntityIds.toList();
-    final cmd = AddRelationshipCommand(tableAId: ids[0], tableBId: ids[1]);
+    final cmd = AddRelationshipCommand(tableAId: ids.first, tableBId: ids.last);
     if (session.run(cmd)) session.setSelection([cmd.createdId!]);
   }
 
@@ -445,6 +469,7 @@ class EditorActions implements CanvasHost {
         item('addTable', Strings.opAddTable),
         item('addJoin', Strings.opAddJoinView),
         item('addFunc', Strings.opAddFunctionView),
+        item('addSql', Strings.opAddSqlView),
         if (session.clipboard != null) item('paste', Strings.opPaste),
         item('selectAll', Strings.opSelectAll),
         item('autoLayout', Strings.opAutoLayout),
@@ -493,6 +518,8 @@ class EditorActions implements CanvasHost {
         onAddViewAt(modelPos, ViewType.join);
       case 'addFunc':
         onAddViewAt(modelPos, ViewType.function);
+      case 'addSql':
+        onAddViewAt(modelPos, ViewType.sql);
       case 'paste':
         session.paste();
       case 'selectAll':
@@ -584,6 +611,8 @@ class EditorActions implements CanvasHost {
         script,
         timeout: Duration(seconds: session.settings.postTimeoutSeconds),
         nameFormat: session.settings.nameFormat,
+        pkNaming: session.settings.pkNaming,
+        dropBeforeCreate: session.settings.dropBeforeCreate,
         onLog: (m) => logger.info('[post] $m'),
       );
     } on PostException catch (e) {
@@ -622,7 +651,9 @@ class EditorActions implements CanvasHost {
   Future<void> exportJson() async {
     final ctx = _ctx;
     final model = session.model;
-    final v = ModelValidator(model, nameFormat: session.settings.nameFormat).validate();
+    final v = ModelValidator(model,
+            nameFormat: session.settings.nameFormat, pkNaming: session.settings.pkNaming)
+        .validate();
     if (v.hasErrors) {
       await showValidationErrors(ctx, v.errors, v.warnings);
       return;
@@ -633,7 +664,10 @@ class EditorActions implements CanvasHost {
       final path = await dialogs.saveBytes(
         title: Strings.runJson,
         fileName: '$base.json',
-        bytes: Uint8List.fromList(utf8.encode(GenerationJsonBuilder(model).buildText(indent: true))),
+        bytes: Uint8List.fromList(utf8.encode(GenerationJsonBuilder(model,
+                pkNaming: session.settings.pkNaming,
+                dropBeforeCreate: session.settings.dropBeforeCreate)
+            .buildText(indent: true))),
         extension: 'json',
         initialDirectory: dir,
       );

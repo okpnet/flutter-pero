@@ -107,6 +107,7 @@ class PasteEntitiesCommand extends ModelCommand {
       for (final t in m.tables) ...[
         for (final c in t.indexes) m.indexName(t, c).toLowerCase(),
         for (final c in t.uniques) m.uniqueName(t, c).toLowerCase(),
+        for (final c in t.checks) m.checkName(t, c).toLowerCase(),
         for (final g in t.triggers) m.triggerName(t, g).toLowerCase(),
       ],
       for (final r in m.relationships) m.foreignKeyName(r).toLowerCase(),
@@ -151,9 +152,17 @@ class PasteEntitiesCommand extends ModelCommand {
             if (cm['nameMode'] == 'manual') cm['name'] = copyConstraintName('${cm['name']}');
           }
         }
+        for (final k in (em['checks'] as List? ?? const [])) {
+          final km = k as Map;
+          km['id'] = m.allocateId();
+          if (km['nameMode'] == 'manual') km['name'] = copyConstraintName('${km['name']}');
+        }
         for (final g in (em['triggers'] as List)) {
           final gm = g as Map;
           gm['id'] = m.allocateId();
+          gm['updateColumnIds'] = [
+            for (final i in (gm['updateColumnIds'] as List? ?? const [])) columnMap[i] ?? i
+          ];
           if (gm['nameMode'] == 'manual') gm['name'] = copyConstraintName('${gm['name']}');
         }
       } else {
@@ -212,6 +221,7 @@ class PasteEntitiesCommand extends ModelCommand {
         name: rm['name'] as String? ?? '',
         onDelete: enumFromWire(RefAction.values, rm['onDelete']) ?? RefAction.noAction,
         onUpdate: enumFromWire(RefAction.values, rm['onUpdate']) ?? RefAction.noAction,
+        deferrable: enumFromWire(Deferrable.values, rm['deferrable']) ?? Deferrable.none,
       ));
     }
     ctx.recalcPages(d);

@@ -25,7 +25,7 @@ void main() {
     expect(m.types.length, standardTypes().length);
     expect(identical(m.types.first, s.settings.typeTable.first), isFalse);
     expect(m.properties.targetDb, DbKind.postgresql);
-    expect(m.methods, isEmpty);
+    expect(m.methods.map((x) => x.name), [emptyStringMethodName]); // 標準メソッドのみ
     expect(m.patterns, isEmpty);
     expect(s.isDirty, isFalse);
     expect(s.filePath, isNull);
@@ -134,7 +134,7 @@ void main() {
     expect(r!.isOk, isTrue);
     expect(s.isDirty, isFalse);
     expect(s.filePath, p('via.pero'));
-    expect(String.fromCharCodes(got!).startsWith('{\n  "formatVersion": 1'), isTrue);
+    expect(String.fromCharCodes(got!).startsWith('{\n  "formatVersion": 2'), isTrue);
     expect((await PeroFile.open(p('via.pero'))).model, isNotNull);
     expect(File(p('via.pero.tmp')).existsSync(), isFalse);
   });

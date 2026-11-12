@@ -45,16 +45,26 @@ class _TypeEditorState extends State<TypeEditor> {
     setState(() {});
   }
 
-  void _add() {
+  void _add([TypeKind kind = TypeKind.scalar]) {
     var n = 1;
     while (widget.types.any((t) => t.id == 'custom_$n')) {
       n++;
     }
+    final base = switch (kind) {
+      TypeKind.scalar => 'custom_$n',
+      TypeKind.composite => 'composite_$n',
+      TypeKind.enumeration => 'enum_$n',
+    };
     final t = DataType(
       id: 'custom_$n',
-      displayName: 'custom_$n',
+      displayName: base,
       category: TypeCategory.string,
-      physical: {for (final d in DbKind.values) d: ''},
+      physical: {
+        for (final d in DbKind.values) d: kind == TypeKind.scalar || d != DbKind.postgresql ? '' : base,
+      },
+      kind: kind,
+      fields: kind == TypeKind.composite ? [TypeField(name: 'field_1', typeId: 'integer')] : null,
+      enumValues: kind == TypeKind.enumeration ? ['value_1'] : null,
     );
     widget.types.add(t);
     _selected = t.id;
@@ -114,7 +124,23 @@ class _TypeEditorState extends State<TypeEditor> {
         width: 230,
         child: Column(children: [
           Row(children: [
-            TextButton.icon(onPressed: _add, icon: const Icon(Icons.add, size: 16), label: const Text('カスタム型を追加')),
+            PopupMenuButton<TypeKind>(
+              tooltip: '型を追加',
+              onSelected: _add,
+              itemBuilder: (c) => const [
+                PopupMenuItem(value: TypeKind.scalar, child: Text('カスタム型')),
+                PopupMenuItem(value: TypeKind.composite, child: Text('複合型(CREATE TYPE ... AS)')),
+                PopupMenuItem(value: TypeKind.enumeration, child: Text('列挙型(CREATE TYPE ... AS ENUM)')),
+              ],
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.add, size: 16),
+                  SizedBox(width: 4),
+                  Text('型を追加'),
+                ]),
+              ),
+            ),
           ]),
           Expanded(
             child: ListView(children: [
@@ -123,7 +149,9 @@ class _TypeEditorState extends State<TypeEditor> {
                   dense: true,
                   selected: t.id == _selected,
                   title: Text(t.displayName),
-                  subtitle: Text(t.isStandard ? '標準 / ${t.id}' : 'カスタム / ${t.id}'),
+                  subtitle: Text(t.isStandard
+                      ? '標準 / ${t.id}'
+                      : '${switch (t.kind) { TypeKind.scalar => 'カスタム', TypeKind.composite => '複合型', TypeKind.enumeration => '列挙型' }} / ${t.id}'),
                   onTap: () => setState(() => _selected = t.id),
                 ),
             ]),
@@ -134,7 +162,9 @@ class _TypeEditorState extends State<TypeEditor> {
       Expanded(
         child: cur == null
             ? const SizedBox()
-            : ListView(key: ValueKey('t${cur.id}'), children: [
+            : cur.isUserDefined
+                ? _userDefined(cur)
+                : ListView(key: ValueKey('t${cur.id}'), children: [
                 Row(children: [
                   Expanded(
                     child: textField('表示名', cur.displayName, (v) {
@@ -211,6 +241,87 @@ class _TypeEditorState extends State<TypeEditor> {
                 ),
               ]),
       ),
+    ]);
+  }
+
+  /// ユーザー定義型(複合型、列挙型)の編集。名前は PostgreSQL の物理名になる(6.3-2)。
+  Widget _userDefined(DataType cur) {
+    final isComposite = cur.kind == TypeKind.composite;
+    return ListView(key: ValueKey('u${cur.id}'), children: [
+      Row(children: [
+        Expanded(
+          child: textField('型の名前(PostgreSQL)', cur.physical[DbKind.postgresql] ?? '', (v) {
+            cur.physical[DbKind.postgresql] = v;
+            cur.displayName = v;
+            widget.onChanged?.call();
+          }, key: ValueKey('un${cur.id}')),
+        ),
+        TextButton.icon(onPressed: _delete, icon: const Icon(Icons.delete_outline, size: 16), label: const Text('削除')),
+      ]),
+      const SizedBox(height: 8),
+      if (isComposite) ...[
+        Row(children: [
+          const Expanded(child: Text('項目')),
+          TextButton.icon(
+            onPressed: () {
+              var n = 1;
+              while (cur.fields.any((f) => f.name == 'field_$n')) {
+                n++;
+              }
+              cur.fields.add(TypeField(name: 'field_$n', typeId: 'integer'));
+              _changed();
+            },
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('追加'),
+          ),
+        ]),
+        for (var i = 0; i < cur.fields.length; i++)
+          Card(
+            key: ValueKey('uf${cur.id}$i${cur.fields.length}'),
+            child: Padding(
+              padding: const EdgeInsets.all(6),
+              child: Column(children: [
+                Row(children: [
+                  Expanded(
+                    child: textField('項目名', cur.fields[i].name, (v) {
+                      cur.fields[i].name = v;
+                      widget.onChanged?.call();
+                    }, key: ValueKey('ufn${cur.id}$i${cur.fields.length}')),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    onPressed: () {
+                      cur.fields.removeAt(i);
+                      _changed();
+                    },
+                  ),
+                ]),
+                TypeAndParams(
+                  types: [for (final t in widget.types) if (t.id != cur.id) t],
+                  typeId: cur.fields[i].typeId,
+                  length: cur.fields[i].length,
+                  precision: cur.fields[i].precision,
+                  scale: cur.fields[i].scale,
+                  onChanged: (t, l, p, s) {
+                    final f = cur.fields[i];
+                    f.typeId = t;
+                    f.length = l;
+                    f.precision = p;
+                    f.scale = s;
+                    _changed();
+                  },
+                ),
+              ]),
+            ),
+          ),
+      ] else
+        textField('値(1行に1つ)', cur.enumValues.join('\n'), (v) {
+          cur.enumValues = [for (final s in v.split('\n')) if (s.trim().isNotEmpty) s.trim()];
+          widget.onChanged?.call();
+        }, key: ValueKey('uv${cur.id}'), multiline: true),
+      const SizedBox(height: 8),
+      Text('PostgreSQL以外の対象DBでは使えません(物理名が空のため生成前検証でエラーになります)。',
+          style: Theme.of(context).textTheme.bodySmall),
     ]);
   }
 

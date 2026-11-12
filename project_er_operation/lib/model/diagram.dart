@@ -58,6 +58,7 @@ class Diagram {
     this.pageCols = 1,
     List<Placement>? placements,
     DiagramView? view,
+    this.schema = '',
   })  : placements = placements ?? [],
         view = view ?? DiagramView();
 
@@ -69,6 +70,9 @@ class Diagram {
   int pageCols;
   List<Placement> placements;
   DiagramView view;
+
+  /// このダイアグラムのスキーマ。空のときはモデルのスキーマを使う(5.2-1)。
+  String schema;
 
   double get pageWidth => pageDimensions(pageSize, orientation).$1;
   double get pageHeight => pageDimensions(pageSize, orientation).$2;
@@ -165,5 +169,6 @@ class Diagram {
         pageCols: pageCols,
         placements: placements.map((p) => p.copy()).toList(),
         view: view.copy(),
+        schema: schema,
       );
 }

@@ -19,6 +19,7 @@ void main() {
     'common_columns': modelCommonColumns,
     'views': modelViews,
     'triggers_cycle': modelTriggersAndCycle,
+    'new_features': modelNewFeatures,
   };
 
   for (final e in cases.entries) {
@@ -34,6 +35,39 @@ void main() {
       expect(sql.contains('\r'), isFalse);
     });
   }
+
+  test('再実行用のDROPと主キー制約名の規則(設定)', () async {
+    final sql = await generateSql(modelNewFeatures(),
+        dropBeforeCreate: true, pkNaming: const PkNaming(prefix: 'p_', suffix: '_key'));
+    final file = File('test/generation/golden/new_features_drop.sql');
+    if (Platform.environment['UPDATE_GOLDEN'] == '1') file.writeAsStringSync(sql);
+    expect(sql, file.readAsStringSync().replaceAll('\r\n', '\n'));
+    expect(sql, contains('DROP TABLE IF EXISTS app.node CASCADE;'));
+    expect(sql, contains('CONSTRAINT p_node_key PRIMARY KEY'));
+  });
+
+  test('スキーマ: ダイアグラムのスキーマが空でなければそれを使い、含めない設定では付けない', () {
+    final m = modelNewFeatures();
+    final node = m.tables.firstWhere((t) => t.physicalName == 'node');
+    final other = m.tables.firstWhere((t) => t.physicalName == 'other');
+    expect(m.schemaOf(node), 'app'); // ダイアグラム1(スキーマ空)はモデルのスキーマ
+    expect(m.schemaOf(other), 'other'); // ダイアグラム2のスキーマ
+    final json = GenerationJsonBuilder(m).build();
+    expect(json['schemas'], ['app', 'other']);
+    m.properties.includeSchema = false;
+    expect(GenerationJsonBuilder(m).build()['schemas'], isEmpty);
+    expect(m.schemaOf(node), '');
+  });
+
+  test('ファンクションは依存テーブルの後に出力する(afterTableId)', () {
+    final json = GenerationJsonBuilder(modelNewFeatures()).build();
+    final fn = (json['methods'] as List).firstWhere((x) => x['name'] == 'count_nodes');
+    final node = (json['tables'] as List).firstWhere((t) => t['physicalName'] == 'node');
+    expect(fn['afterTableId'], node['id']);
+    final vf = (json['methods'] as List).firstWhere((x) => x['name'] == 'view_rows');
+    final view = (json['views'] as List).firstWhere((x) => x['physicalName'] == 'v_node');
+    expect((vf['afterTableId'], vf['afterViewId']), (null, view['id']));
+  });
 
   test('循環する外部キーは deferred になり、トポロジカル順に並ぶ', () {
     final json = GenerationJsonBuilder(modelTriggersAndCycle()).build();
@@ -51,7 +85,7 @@ void main() {
   test('生成用JSONの構造(付録B): 共通列のorigin、type展開、primaryKey、制約名の解決', () {
     final m = modelCommonColumns();
     final json = GenerationJsonBuilder(m).build();
-    expect(json['apiVersion'], 1);
+    expect(json['apiVersion'], 2);
     expect(json['targetDb'], 'postgresql');
     final t = (json['tables'] as List).firstWhere((t) => t['physicalName'] == 'mst_item');
     expect((t['columns'] as List).map((c) => c['origin']), ['common', 'table', 'table', 'common', 'common']);
@@ -59,7 +93,7 @@ void main() {
     expect(t['primaryKey'], {'name': 'mst_item_pk', 'columns': ['id']});
     expect((t['indexes'] as List).single['name'], 'mst_item_idx1');
     final created = (t['columns'] as List)[3];
-    expect(created['default'], {'kind': 'method', 'value': '', 'call': 'now()'});
+    expect(created['default'], {'kind': 'method', 'value': '', 'call': 'now()', 'expression': ''});
     expect(created['typeCategory'], 'datetime');
     final noPk = (json['tables'] as List).firstWhere((t) => t['physicalName'] == 'tmp_item');
     expect(noPk['primaryKey'], isNotNull);
@@ -101,11 +135,12 @@ void main() {
 
   test('メタ情報 @post の解析とapiVersion検査', () {
     final meta = parsePostMeta(postScript)!;
-    expect((meta.name, meta.targetDb, meta.apiVersion), ('PostgreSQL', 'postgresql', 1));
+    expect((meta.name, meta.targetDb, meta.apiVersion), ('PostgreSQL', 'postgresql', 2));
     expect(checkPostApiVersion(meta), isNull);
     expect(parsePostMeta('// no meta\nfunction main(){}'), isNull);
-    expect(checkPostApiVersion(parsePostMeta('// @post name=x y targetDb=mysql apiVersion=2')), isNotNull);
-    expect(parsePostMeta('// @post name=x y targetDb=mysql apiVersion=2')!.name, 'x y');
+    expect(checkPostApiVersion(parsePostMeta('// @post name=x y targetDb=mysql apiVersion=3')), isNotNull);
+    expect(checkPostApiVersion(parsePostMeta('// @post name=x y targetDb=mysql apiVersion=1')), isNotNull);
+    expect(parsePostMeta('// @post name=x y targetDb=mysql apiVersion=3')!.name, 'x y');
     // 先頭10行を超えた位置のメタ情報は無効
     expect(parsePostMeta('${'\n' * 10}// @post name=a targetDb=b apiVersion=1'), isNull);
   });

@@ -13,6 +13,8 @@ class ModelProperties {
     this.postPath = '',
     this.startQuery = '',
     this.endQuery = '',
+    this.schema = '',
+    this.includeSchema = false,
   });
   String outputFileName;
   String outputFolder;
@@ -21,16 +23,41 @@ class ModelProperties {
   String startQuery;
   String endQuery;
 
+  /// 出力に使うスキーマ(ダイアグラムのスキーマが空のときに使う。5.1-2)。
+  String schema;
+
+  /// 出力にスキーマを含める(5.1-2)。
+  bool includeSchema;
+
   ModelProperties copy() => ModelProperties(
       outputFileName: outputFileName,
       outputFolder: outputFolder,
       targetDb: targetDb,
       postPath: postPath,
       startQuery: startQuery,
-      endQuery: endQuery);
+      endQuery: endQuery,
+      schema: schema,
+      includeSchema: includeSchema);
 }
 
 /// モデル(`.pero` ファイル1つに対応するデータ全体。ルート)。
+/// 標準メソッド「空文字」(6.2-4)。空文字のデフォルトを表す外部定義のファンクション。
+const String emptyStringMethodName = 'empty_string';
+
+/// 主キー制約名の規則(設定。6.4-1)。名前は「プリフィクス + テーブル物理名 + サフィックス」。
+class PkNaming {
+  const PkNaming({this.prefix = '', this.suffix = '_pk'});
+  final String prefix;
+  final String suffix;
+}
+
+MethodDef standardEmptyStringMethod(int id) => MethodDef(
+      id: id,
+      name: emptyStringMethodName,
+      external: true,
+      call: {for (final d in DbKind.values) d: "''"},
+    );
+
 class ErModel {
   ErModel({
     required this.id,
@@ -65,7 +92,20 @@ class ErModel {
     );
     m.diagrams.add(Diagram(
         id: m.allocateId(), name: 'ダイアグラム1', pageSize: pageSize, orientation: orientation));
+    m.methods.add(standardEmptyStringMethod(m.allocateId()));
     return m;
+  }
+
+  /// エンティティの出力スキーマ(5.2-1)。出力にスキーマを含めない設定のときは空。
+  /// 配置しているダイアグラムのうち、タブ順で最初のスキーマ(空でないもの)を使い、無ければモデルのスキーマ。
+  String schemaOf(Entity e) {
+    if (!properties.includeSchema) return '';
+    for (final d in diagrams) {
+      if (d.placementOf(e.id) != null) {
+        return d.schema.isNotEmpty ? d.schema : properties.schema;
+      }
+    }
+    return properties.schema;
   }
 
   int id;
@@ -195,7 +235,13 @@ class ErModel {
     return '${t.physicalName}_trg${n.toString().padLeft(2, '0')}';
   }
 
-  String primaryKeyName(TableEntity t) => '${t.physicalName}_pk';
+  String primaryKeyName(TableEntity t, [PkNaming naming = const PkNaming()]) =>
+      '${naming.prefix}${t.physicalName}${naming.suffix}';
+
+  String checkName(TableEntity t, CheckDef c) {
+    if (c.nameMode == NameMode.manual) return c.name;
+    return '${t.physicalName}_ck${t.checks.indexOf(c) + 1}';
+  }
 
   String foreignKeyName(Relationship r) {
     if (r.nameMode == NameMode.manual) return r.name;

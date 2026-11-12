@@ -21,6 +21,7 @@ class Strings {
   static const opAddTable = 'テーブルの追加';
   static const opAddJoinView = 'ビューの追加(結合ビュー)';
   static const opAddFunctionView = 'ビューの追加(関数ビュー)';
+  static const opAddSqlView = 'ビューの追加(SQLビュー)';
   static const opRemoveFromDiagram = 'このダイアグラムから外す';
   static const opDeleteFromModel = 'モデルから削除';
   static const opAddRelationship = 'リレーションシップの追加';
@@ -48,6 +49,7 @@ class Strings {
   static const sideTable = 'テーブル';
   static const sideJoinView = '結合ビュー';
   static const sideFunctionView = '関数ビュー';
+  static const sideSqlView = 'SQLビュー';
 
   // ダイアログ・メッセージ
   static const save = '保存';

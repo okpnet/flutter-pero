@@ -21,8 +21,21 @@ class LoadResult {
 /// `.pero` の復元と、JSON構造の整合性確認(9.4)。
 /// 欠落・型の不一致・値域外は標準(付録Aの既定値)に置き換え、記録する。
 class PeroDecoder {
-  PeroDecoder._(this._rep);
+  PeroDecoder._(this._rep, {this.legacy = false});
   final Repairs _rep;
+
+  /// 旧い形式(formatVersion 1)のファイル。後から加わったキーの欠落は、修復として記録せず既定値にする(9.4-3)。
+  final bool legacy;
+
+  bool _absentOk(Map<String, dynamic> m, String k) => legacy && !m.containsKey(k);
+  String _strN(Map<String, dynamic> m, String k, String path, [String def = '']) =>
+      _absentOk(m, k) ? def : _str(m, k, path, def);
+  bool _boolN(Map<String, dynamic> m, String k, String path, bool def) =>
+      _absentOk(m, k) ? def : _bool(m, k, path, def);
+  T _enumN<T extends Enum>(List<T> values, Map<String, dynamic> m, String k, String path, T def) =>
+      _absentOk(m, k) ? def : _enum(values, m, k, path, def);
+  Map<String, dynamic> _objN(Map<String, dynamic> m, String k, String path) =>
+      _absentOk(m, k) ? {} : _obj(m[k], '$path.$k');
 
   static LoadResult decode(String text) {
     Object? root;
@@ -40,7 +53,7 @@ class PeroDecoder {
           tooNew: true);
     }
     final rep = Repairs();
-    final model = PeroDecoder._(rep)._model(root);
+    final model = PeroDecoder._(rep, legacy: fv is! int || fv < currentFormatVersion)._model(root);
     final (ok, r2) = IntegrityRepairer.repairAll(model);
     rep.addAll(r2);
     if (!ok) return LoadResult.fail('整合性を回復できませんでした');
@@ -48,11 +61,14 @@ class PeroDecoder {
   }
 
   // ---- 単体要素の復元(コマンドの引数復元用) ----
-  static Entity? entityFromMap(Object? m) => PeroDecoder._(Repairs())._entity(m, 'entity');
-  static DataType? typeFromMap(Object? m) => PeroDecoder._(Repairs())._type(m, 'type');
-  static MethodDef? methodFromMap(Object? m) => PeroDecoder._(Repairs())._method(m, 'method');
+  static Entity? entityFromMap(Object? m) =>
+      PeroDecoder._(Repairs(), legacy: true)._entity(m, 'entity');
+  static DataType? typeFromMap(Object? m) =>
+      PeroDecoder._(Repairs(), legacy: true)._type(m, 'type');
+  static MethodDef? methodFromMap(Object? m) =>
+      PeroDecoder._(Repairs(), legacy: true)._method(m, 'method');
   static CommonColumnPattern? patternFromMap(Object? m) =>
-      PeroDecoder._(Repairs())._pattern(m, 'pattern');
+      PeroDecoder._(Repairs(), legacy: true)._pattern(m, 'pattern');
 
   // ---- 読み取りヘルパ ----
   Map<String, dynamic> _obj(Object? v, String path) {
@@ -145,6 +161,8 @@ class PeroDecoder {
         postPath: _str(props, 'postPath', 'properties'),
         startQuery: _str(props, 'startQuery', 'properties'),
         endQuery: _str(props, 'endQuery', 'properties'),
+        schema: _strN(props, 'schema', 'properties'),
+        includeSchema: _boolN(props, 'includeSchema', 'properties', false),
       ),
     );
     if (nextIdRaw is! int) _rep.add('nextId: 不正のため再計算');
@@ -155,6 +173,9 @@ class PeroDecoder {
     for (final v in _list(root['types'], 'types')) {
       final t = _type(v, 'types[${i++}]');
       if (t != null) m.types.add(t);
+    }
+    if (legacy && m.typeById('interval') == null) {
+      m.types.add(standardTypes().firstWhere((t) => t.id == 'interval')); // 形式2への移行
     }
     i = 0;
     for (final v in _list(root['methods'], 'methods')) {
@@ -192,6 +213,24 @@ class PeroDecoder {
       return null;
     }
     final params = _obj(m['defaultParams'], '$path.defaultParams');
+    final fields = <TypeField>[];
+    var fi = 0;
+    for (final x in _list(m['fields'], '$path.fields')) {
+      final p = '$path.fields[${fi++}]';
+      final fm = _obj(x, p);
+      final tid = fm['typeId'];
+      if (tid is! String) {
+        _rep.add('$p.typeId: 不正のため項目を削除');
+        continue;
+      }
+      fields.add(TypeField(
+        name: _str(fm, 'name', p),
+        typeId: tid,
+        length: _intOrNull(fm, 'length', p),
+        precision: _intOrNull(fm, 'precision', p),
+        scale: _intOrNull(fm, 'scale', p),
+      ));
+    }
     return DataType(
       id: id,
       displayName: _str(m, 'displayName', path, id),
@@ -202,6 +241,12 @@ class PeroDecoder {
       category: _enum(TypeCategory.values, m, 'category', path, TypeCategory.string),
       physical: _perDb(m['physical'], '$path.physical'),
       isStandard: standardTypeIds.contains(id),
+      kind: _enumN(TypeKind.values, m, 'kind', path, TypeKind.scalar),
+      fields: fields,
+      enumValues: [
+        for (final v in _list(m['enumValues'], '$path.enumValues'))
+          if (v is String) v
+      ],
     );
   }
 
@@ -216,6 +261,12 @@ class PeroDecoder {
       external: _bool(m, 'external', path, false),
       call: _perDb(m['call'], '$path.call'),
       bodies: _perDb(m['bodies'], '$path.bodies'),
+      comment: _strN(m, 'comment', path),
+      args: _strN(m, 'args', path),
+      dependsOnTableIds: [
+        for (final v in _list(m['dependsOnTableIds'], '$path.dependsOnTableIds'))
+          if (v is int) v
+      ],
     );
   }
 
@@ -241,6 +292,7 @@ class PeroDecoder {
       defaultKind: _enum(DefaultKind.values, m, 'defaultKind', path, DefaultKind.none),
       defaultValue: _str(m, 'defaultValue', path),
       defaultMethodId: _intOrNull(m, 'defaultMethodId', path),
+      defaultExpression: _strN(m, 'defaultExpression', path),
       comment: _str(m, 'comment', path),
     );
   }
@@ -286,7 +338,25 @@ class PeroDecoder {
           id: id,
           nameMode: _enum(NameMode.values, m, 'nameMode', p, NameMode.auto),
           name: _str(m, 'name', p),
-          columnIds: ids));
+          columnIds: ids,
+          nullsNotDistinct: _boolN(m, 'nullsNotDistinct', p, false)));
+    }
+    return out;
+  }
+
+  List<CheckDef> _checks(Object? v, String path) {
+    final out = <CheckDef>[];
+    var i = 0;
+    for (final x in _list(v, path)) {
+      final p = '$path[${i++}]';
+      final m = _obj(x, p);
+      final id = _id(m, p);
+      if (id == null) continue;
+      out.add(CheckDef(
+          id: id,
+          nameMode: _enum(NameMode.values, m, 'nameMode', p, NameMode.auto),
+          name: _str(m, 'name', p),
+          expression: _str(m, 'expression', p)));
     }
     return out;
   }
@@ -319,6 +389,11 @@ class PeroDecoder {
       events: events,
       forEach: _enum(TriggerForEach.values, m, 'forEach', path, TriggerForEach.row),
       when: _str(m, 'when', path),
+      args: _strN(m, 'args', path),
+      updateColumnIds: [
+        for (final c in _list(m['updateColumnIds'], '$path.updateColumnIds'))
+          if (c is int) c
+      ],
     );
   }
 
@@ -361,6 +436,7 @@ class PeroDecoder {
         columns: cols,
         indexes: _constraints(m['indexes'], '$path.indexes'),
         uniques: _constraints(m['uniques'], '$path.uniques'),
+        checks: _checks(m['checks'], '$path.checks'),
         triggers: trig,
       );
     }
@@ -430,6 +506,26 @@ class PeroDecoder {
         scale: _intOrNull(cm, 'scale', p),
       ));
     }
+    final sm0 = _objN(m, 'sql', path);
+    final scols = <FunctionReturnColumn>[];
+    i = 0;
+    for (final c in _list(sm0['columns'], '$path.sql.columns')) {
+      final p = '$path.sql.columns[${i++}]';
+      final cm = _obj(c, p);
+      final tid = cm['typeId'];
+      if (tid is! String) {
+        _rep.add('$p.typeId: 不正のため列を削除');
+        continue;
+      }
+      scols.add(FunctionReturnColumn(
+        name: _str(cm, 'name', p),
+        logicalName: _str(cm, 'logicalName', p),
+        typeId: tid,
+        length: _intOrNull(cm, 'length', p),
+        precision: _intOrNull(cm, 'precision', p),
+        scale: _intOrNull(cm, 'scale', p),
+      ));
+    }
     return ViewEntity(
       id: id,
       logicalName: logical,
@@ -439,6 +535,7 @@ class PeroDecoder {
       preQuery: pre,
       postQuery: post,
       viewType: vt,
+      sql: ViewSqlDef(sql: _strN(sm0, 'sql', '$path.sql'), columns: scols),
       join: ViewJoinDef(sources: sources, columns: outCols, where: _str(jm, 'where', '$path.join')),
       function: ViewFunctionDef(
         methodId: _intOrNull(fm, 'methodId', '$path.function'),
@@ -484,6 +581,7 @@ class PeroDecoder {
       name: _str(m, 'name', path),
       onDelete: _enum(RefAction.values, m, 'onDelete', path, RefAction.noAction),
       onUpdate: _enum(RefAction.values, m, 'onUpdate', path, RefAction.noAction),
+      deferrable: _enumN(Deferrable.values, m, 'deferrable', path, Deferrable.none),
     );
   }
 
@@ -524,6 +622,7 @@ class PeroDecoder {
       pageRows: pageCount('pageRows'),
       pageCols: pageCount('pageCols'),
       placements: placements,
+      schema: _strN(m, 'schema', path),
       view: DiagramView(
         zoom: _num(vm, 'zoom', '$path.view', 1.0, min: 0.25, max: 4.0),
         scrollX: _num(vm, 'scrollX', '$path.view', 0),

@@ -18,7 +18,7 @@ void main() {
   test('保存形式: インデント2、末尾LF、キー順は付録Aのとおり', () {
     final text = PeroEncoder.encode(fullModel());
     expect(text.contains('\r'), isFalse);
-    expect(text.startsWith('{\n  "formatVersion": 1,\n  "appVersion"'), isTrue);
+    expect(text.startsWith('{\n  "formatVersion": 2,\n  "appVersion"'), isTrue);
     final keys = RegExp(r'^  "(\w+)"', multiLine: true).allMatches(text).map((x) => x.group(1)).toList();
     expect(keys, [
       'formatVersion', 'appVersion', 'id', 'nextId', 'properties', 'types', 'methods',

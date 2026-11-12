@@ -47,16 +47,19 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, '名前'), 'fn_b');
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
-    expect(out!.map((x) => x.name), ['fn_b', 'FN_A']);
-    expect(out!.first.bodies[DbKind.postgresql], 'CREATE FUNCTION fn_a() ...'); // 本体は先頭に入力したもの
-    expect(out!.first.id, isNot(out!.last.id));
-    expect(out!.first.id, greaterThanOrEqualTo(m.nextId));
+    expect(out!.map((x) => x.name), ['empty_string', 'fn_b', 'FN_A']);
+    final fnB = out!.firstWhere((x) => x.name == 'fn_b');
+    expect(fnB.bodies[DbKind.postgresql], 'CREATE FUNCTION fn_a() ...'); // 本体は先頭に入力したもの
+    expect(fnB.id, isNot(out!.last.id));
+    expect(fnB.id, greaterThanOrEqualTo(m.nextId));
   });
 
   testWidgets('メソッド管理: 参照されているメソッドの削除は警告し、関数ビューが参照していれば削除できない', (tester) async {
     final m = fullModel();
     List<MethodDef>? out;
-    await openDialog<List<MethodDef>>(tester, (c) => showMethodDialog(c, m, nameFormat: _fmt), (r) => out = r);
+    final nowUtc = m.methods.firstWhere((x) => x.name == 'now_utc').id;
+    await openDialog<List<MethodDef>>(
+        tester, (c) => showMethodDialog(c, m, nameFormat: _fmt, selectId: nowUtc), (r) => out = r);
     await tester.tap(find.text('削除'));
     await tester.pumpAndSettle();
     expect(find.text('削除できません'), findsOneWidget); // now_utc は関数ビューとデフォルトから参照されている
@@ -71,7 +74,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
-    expect(out!.map((x) => x.name), ['now_utc']);
+    expect(out!.map((x) => x.name), ['empty_string', 'now_utc']);
   });
 
   testWidgets('共通列パターン管理: 追加、正規表現の試験欄、一致テーブルの一覧、列の追加', (tester) async {
@@ -109,7 +112,9 @@ void main() {
     final m = ErModel.empty();
     (List<DataType>, Map<String, String>)? out;
     await openDialog<(List<DataType>, Map<String, String>)>(tester, (c) => showTypeManagerDialog(c, m), (r) => out = r);
-    await tester.tap(find.text('カスタム型を追加'));
+    await tester.tap(find.text('型を追加'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('カスタム型'));
     await tester.pumpAndSettle();
     await tester.enterText(find.widgetWithText(TextFormField, '表示名'), 'money');
     await tester.pumpAndSettle();
@@ -119,6 +124,68 @@ void main() {
     expect(out!.$1.last.id, 'custom_1');
     expect(out!.$1.last.displayName, 'money');
     expect(out!.$1.last.isStandard, isFalse);
+  });
+
+  testWidgets('型管理: 複合型と列挙型を追加して項目・値を編集できる(6.3)', (tester) async {
+    final m = ErModel.empty();
+    (List<DataType>, Map<String, String>)? out;
+    await openDialog<(List<DataType>, Map<String, String>)>(tester, (c) => showTypeManagerDialog(c, m), (r) => out = r);
+    await tester.tap(find.text('型を追加'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('列挙型(CREATE TYPE ... AS ENUM)'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, '型の名前(PostgreSQL)'), 'mood');
+    await tester.enterText(find.widgetWithText(TextFormField, '値(1行に1つ)'), 'sad\nok\n\nhappy');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('型を追加'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('複合型(CREATE TYPE ... AS)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('追加').last); // 項目を追加
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    final enumT = out!.$1.firstWhere((t) => t.kind == TypeKind.enumeration);
+    expect((enumT.physical[DbKind.postgresql], enumT.displayName), ('mood', 'mood'));
+    expect(enumT.enumValues, ['sad', 'ok', 'happy']);
+    final comp = out!.$1.firstWhere((t) => t.kind == TypeKind.composite);
+    expect(comp.fields.map((f) => f.name), ['field_1', 'field_2']);
+  });
+
+  testWidgets('SQLビュー定義: SQLが空だとエラー。入力してOKで定義が返る(6.6-18)', (tester) async {
+    final m = fullModel();
+    ViewEntity? out;
+    await openDialog<ViewEntity>(tester, (c) => showSqlViewDialog(c, m, nameFormat: _fmt), (r) => out = r);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.text('SQL(SELECT文)を入力してください'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextFormField, '物理名'), 'v_sql_x');
+    await tester.enterText(find.byKey(const ValueKey('ssql')), 'SELECT 1 AS one');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(out!.viewType, ViewType.sql);
+    expect((out!.physicalName, out!.sql.sql), ('v_sql_x', 'SELECT 1 AS one'));
+  });
+
+  testWidgets('メソッド管理: コメント、引数、依存テーブルを設定できる(8.1-3)', (tester) async {
+    final m = fullModel();
+    List<MethodDef>? out;
+    final nowUtc = m.methods.firstWhere((x) => x.name == 'now_utc').id;
+    await openDialog<List<MethodDef>>(
+        tester, (c) => showMethodDialog(c, m, nameFormat: _fmt, selectId: nowUtc), (r) => out = r);
+    await tester.enterText(find.widgetWithText(TextFormField, 'コメント(COMMENT ON FUNCTION で出力)'), '新しいコメント');
+    await tester.enterText(find.widgetWithText(TextFormField, '引数の定義(COMMENT ON FUNCTION 名前(引数) の括弧の内側)'), 'uuid');
+    await tester.enterText(find.widgetWithText(TextField, 'テーブル・ビューを検索して追加'), 'orders');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('orders').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    final f = out!.firstWhere((x) => x.name == 'now_utc');
+    expect((f.comment, f.args), ('新しいコメント', 'uuid'));
+    final orders = m.tables.firstWhere((t) => t.physicalName == 'orders');
+    expect(f.dependsOnTableIds, containsAll([orders.id]));
   });
 
   testWidgets('関数ビュー定義: 関数未選択と戻り列なしはエラー。入力してOKで定義が返る', (tester) async {

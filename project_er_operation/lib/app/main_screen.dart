@@ -250,6 +250,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
           mi(Strings.opAddTable, actions.addTableAtCenter),
           mi(Strings.opAddJoinView, () => actions.addViewAtCenter(ViewType.join)),
           mi(Strings.opAddFunctionView, () => actions.addViewAtCenter(ViewType.function)),
+          mi(Strings.opAddSqlView, () => actions.addViewAtCenter(ViewType.sql)),
           const Divider(height: 1),
           mi(Strings.opRemoveFromDiagram, actions.canRemoveFromDiagram ? actions.removeFromDiagram : null, key: const SingleActivator(LogicalKeyboardKey.delete)),
           mi(Strings.opDeleteFromModel, actions.canRemoveFromDiagram ? actions.deleteFromModel : null, key: const SingleActivator(LogicalKeyboardKey.delete, control: true)),
@@ -351,6 +352,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
         item(SideItem.table, Icons.table_chart_outlined, Strings.sideTable, actions.addTableAtCenter),
         item(SideItem.joinView, Icons.join_inner, Strings.sideJoinView, () => actions.addViewAtCenter(ViewType.join)),
         item(SideItem.functionView, Icons.functions, Strings.sideFunctionView, () => actions.addViewAtCenter(ViewType.function)),
+        item(SideItem.sqlView, Icons.code, Strings.sideSqlView, () => actions.addViewAtCenter(ViewType.sql)),
       ]),
     );
   }

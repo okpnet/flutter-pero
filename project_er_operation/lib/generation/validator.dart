@@ -36,9 +36,13 @@ int identifierMaxLength(DbKind db) => switch (db) {
 
 /// 生成前検証(9.5)。
 class ModelValidator {
-  ModelValidator(this.model, {String nameFormat = r'^[A-Za-z_][A-Za-z0-9_]*$'})
+  ModelValidator(this.model,
+      {String nameFormat = r'^[A-Za-z_][A-Za-z0-9_]*$', this.pkNaming = const PkNaming()})
       : _nameRegex = _compile(nameFormat);
   final ErModel model;
+
+  /// 主キー制約名の規則(設定。6.4-1)。
+  final PkNaming pkNaming;
   final RegExp? _nameRegex;
 
   static RegExp? _compile(String s) {
@@ -57,6 +61,8 @@ class ModelValidator {
 
   ValidationResult validate() {
     _checkPatterns();
+    _checkUserTypes();
+    _checkSchemas();
     _checkMethods();
     _checkEntityNames();
     for (final t in model.tables) {
@@ -97,12 +103,52 @@ class ModelValidator {
     }
   }
 
+  void _checkUserTypes() {
+    for (final t in model.types.where((t) => t.isUserDefined)) {
+      final name = t.physical[_db] ?? '';
+      _checkName('ユーザー定義型', name);
+      if (t.kind == TypeKind.composite) {
+        if (t.fields.isEmpty) _err('複合型「${t.displayName}」に項目がありません');
+        final seen = <String>{};
+        for (final f in t.fields) {
+          _checkName('複合型「${t.displayName}」の項目', f.name);
+          if (!seen.add(f.name.toLowerCase())) {
+            _err('複合型「${t.displayName}」の項目名「${f.name}」が重複しています');
+          }
+          final ft = model.typeById(f.typeId);
+          if (ft == null || (ft.physical[_db] ?? '').isEmpty) {
+            _err('複合型「${t.displayName}」の項目「${f.name}」の型が存在しない、または${_db.wire}の物理名がありません');
+          }
+        }
+      } else if (t.enumValues.isEmpty) {
+        _err('列挙型「${t.displayName}」に値がありません');
+      }
+    }
+  }
+
+  void _checkSchemas() {
+    if (!model.properties.includeSchema) return;
+    final names = {
+      model.properties.schema,
+      for (final d in model.diagrams) d.schema,
+    }..remove('');
+    for (final s in names) {
+      if (!_nameOk(s)) _err('スキーマ名「$s」が形式に一致しません');
+    }
+    if (model.properties.schema.isEmpty && model.diagrams.any((d) => d.schema.isEmpty)) {
+      _warn('出力にスキーマを含めますが、モデルのスキーマが空のため、スキーマなしで出力するエンティティがあります');
+    }
+  }
+
   void _checkMethods() {
     final seen = <String>{};
     for (final m in model.methods) {
       _checkName('メソッド', m.name);
       if (m.name.isNotEmpty && !seen.add(m.name.toLowerCase())) {
         _err('メソッド名「${m.name}」が重複しています');
+      }
+      for (final id in m.dependsOnTableIds) {
+        if (model.entityById(id) == null) _err('メソッド「${m.name}」の依存テーブル・ビューが存在しません');
       }
     }
   }
@@ -156,6 +202,9 @@ class ModelValidator {
       }
       _checkTypeUse(c.typeId, 'テーブル「${t.physicalName}」の列「${c.physicalName}」', t.id);
       if (model.typeById(c.typeId)?.category == TypeCategory.auto) autoCount++;
+      if (c.defaultKind == DefaultKind.expression && c.defaultExpression.trim().isEmpty) {
+        _err('列「${t.physicalName}.${c.physicalName}」のデフォルトの式が空です', t.id);
+      }
       if (c.defaultKind == DefaultKind.method) {
         final m = c.defaultMethodId == null ? null : model.methodById(c.defaultMethodId!);
         if (m == null) {
@@ -184,10 +233,28 @@ class ModelValidator {
       }
     }
 
+    for (final c in t.checks) {
+      if (c.nameMode == NameMode.manual) _checkName('CHECK制約名', c.name, eid: t.id);
+      if (c.expression.trim().isEmpty) {
+        _err('テーブル「${t.physicalName}」のCHECK制約「${model.checkName(t, c)}」の式が空です', t.id);
+      }
+    }
+
     for (final g in t.triggers) {
       final name = model.triggerName(t, g);
       if (g.nameMode == NameMode.manual) _checkName('トリガー名', name, eid: t.id);
       if (g.events.isEmpty) _err('トリガー「$name」のイベントが未選択です', t.id);
+      for (final id in g.updateColumnIds) {
+        if (!ids.contains(id)) {
+          final pc = model.patternColumnById(id);
+          _err(pc != null
+              ? '共通列 ${pc.physicalName} がテーブル ${t.physicalName} に展開されません(トリガー「$name」のUPDATE列)'
+              : 'トリガー「$name」のUPDATE列が存在しない列を参照しています', t.id);
+        }
+      }
+      if (g.updateColumnIds.isNotEmpty && !g.events.contains(TriggerEvent.update)) {
+        _warn('トリガー「$name」はUPDATEのイベントがないため、UPDATE列の指定は使われません', t.id);
+      }
       if (g.source == TriggerSource.public) {
         final m = g.methodId == null ? null : model.methodById(g.methodId!);
         if (m == null) {
@@ -203,6 +270,16 @@ class ModelValidator {
 
   void _checkView(ViewEntity v) {
     final label = 'ビュー「${v.physicalName}」';
+    if (v.viewType == ViewType.sql) {
+      if (v.sql.sql.trim().isEmpty) _err('$labelのSQLが空です', v.id);
+      final names = <String>{};
+      for (final c in v.sql.columns) {
+        _checkName('$labelの列', c.name, eid: v.id);
+        if (!names.add(c.name.toLowerCase())) _err('$labelの列名「${c.name}」が重複しています', v.id);
+        _checkTypeUse(c.typeId, '$labelの列「${c.name}」', v.id);
+      }
+      return;
+    }
     if (v.viewType == ViewType.function) {
       final m = v.function.methodId == null ? null : model.methodById(v.function.methodId!);
       if (m == null) {
@@ -268,7 +345,10 @@ class ModelValidator {
     }
 
     for (final t in model.tables) {
-      if (t.primaryKeyColumns.isNotEmpty) add(model.primaryKeyName(t), '主キー');
+      if (t.primaryKeyColumns.isNotEmpty) add(model.primaryKeyName(t, pkNaming), '主キー');
+      for (final c in t.checks) {
+        add(model.checkName(t, c), 'CHECK');
+      }
       for (final c in t.indexes) {
         add(model.indexName(t, c), 'インデックス');
       }

@@ -85,6 +85,7 @@ class IntegrityRepairer {
         e.columns.removeWhere((c) => !take(c.id, '列'));
         e.indexes.removeWhere((c) => !take(c.id, 'インデックス'));
         e.uniques.removeWhere((c) => !take(c.id, 'ユニーク'));
+        e.checks.removeWhere((c) => !take(c.id, 'CHECK制約'));
         e.triggers.removeWhere((c) => !take(c.id, 'トリガー'));
       }
       return false;
@@ -114,6 +115,14 @@ class IntegrityRepairer {
           rep.add('共通列 ${c.physicalName} のPKを解除');
         }
         _fixDefault(c, methodIds, rep);
+      }
+    }
+    final tableIds = m.entities.map((e) => e.id).toSet();
+    for (final x in m.methods) {
+      final before = x.dependsOnTableIds.length;
+      x.dependsOnTableIds.removeWhere((id) => !tableIds.contains(id));
+      if (x.dependsOnTableIds.length != before) {
+        rep.add('メソッド ${x.name} の存在しない依存テーブルを削除');
       }
     }
   }
@@ -163,6 +172,13 @@ class IntegrityRepairer {
           return false;
         });
       }
+      for (final g in t.triggers) {
+        final before = g.updateColumnIds.length;
+        g.updateColumnIds.removeWhere((id) => !valid(id));
+        if (g.updateColumnIds.length != before) {
+          rep.add('テーブル ${t.physicalName} のトリガーの存在しないUPDATE列を削除');
+        }
+      }
       t.triggers.removeWhere((g) {
         if (g.source == TriggerSource.public &&
             (g.methodId == null || !methodIds.contains(g.methodId))) {
@@ -178,6 +194,13 @@ class IntegrityRepairer {
     }
 
     for (final v in m.views) {
+      v.sql.columns.removeWhere((c) {
+        if (!typeIds.contains(c.typeId)) {
+          rep.add('ビュー ${v.physicalName} の列の型が存在しないため削除');
+          return true;
+        }
+        return false;
+      });
       final f = v.function;
       if (f.methodId != null && !methodIds.contains(f.methodId)) {
         rep.add('ビュー ${v.physicalName} のメソッドが存在しないため解除');

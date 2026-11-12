@@ -180,3 +180,92 @@ ErModel modelTriggersAndCycle() {
       onUpdate: RefAction.none));
   return m;
 }
+
+/// 6. 形式2の機能: スキーマ、ユーザー定義型、CHECK、NULLS NOT DISTINCT、DEFERRABLE、自己参照、
+///    トリガーの引数とUPDATE OF、SQLビュー、依存テーブルのあるファンクション、式のデフォルト、空文字のデフォルト
+ErModel modelNewFeatures() {
+  final m = ErModel.empty();
+  m.properties
+    ..schema = 'app'
+    ..includeSchema = true
+    ..startQuery = 'SET search_path TO app, public;';
+  m.types.addAll([
+    DataType(
+        id: 'custom_1',
+        displayName: 'status_t',
+        physical: {DbKind.postgresql: 'status_t'},
+        kind: TypeKind.enumeration,
+        enumValues: ['open', "it's closed"]),
+    DataType(
+        id: 'custom_2',
+        displayName: 'point_t',
+        physical: {DbKind.postgresql: 'point_t'},
+        kind: TypeKind.composite,
+        fields: [TypeField(name: 'x', typeId: 'integer'), TypeField(name: 'label', typeId: 'varchar', length: 20)]),
+  ]);
+  final emptyId = m.methods.firstWhere((x) => x.name == emptyStringMethodName).id;
+  final touch = MethodDef(
+      id: m.allocateId(),
+      kind: MethodKind.trigger,
+      name: 'touch',
+      comment: '更新日時を設定する',
+      bodies: {for (final d in DbKind.values) d: d == DbKind.postgresql ? 'CREATE FUNCTION touch() RETURNS trigger AS \$\$ BEGIN RETURN NEW; END \$\$ LANGUAGE plpgsql' : ''});
+  final count = MethodDef(
+      id: m.allocateId(),
+      name: 'count_nodes',
+      comment: 'ノード数',
+      args: '',
+      bodies: {for (final d in DbKind.values) d: d == DbKind.postgresql ? 'CREATE FUNCTION count_nodes() RETURNS bigint AS \$\$ SELECT count(*) FROM node \$\$ LANGUAGE sql' : ''});
+  m.methods.addAll([touch, count]);
+  final node = table(m, 'node', [
+    col(m, 'id', 'auto', pk: true),
+    col(m, 'parent_id', 'integer'),
+    col(m, 'name', 'varchar', length: 20, defKind: DefaultKind.method, defMethod: emptyId),
+    col(m, 'qty', 'numeric'),
+    col(m, 'due', 'date', defKind: DefaultKind.expression, defExpression: 'CURRENT_DATE + 30'),
+    col(m, 'state', 'custom_1'),
+  ], logical: 'ノード');
+  node.uniques.add(ConstraintDef(
+      id: m.allocateId(),
+      nameMode: NameMode.manual,
+      name: 'node_uq',
+      columnIds: [node.columns[2].id, node.columns[3].id],
+      nullsNotDistinct: true));
+  node.checks.add(CheckDef(id: m.allocateId(), expression: 'qty >= 0'));
+  node.checks.add(CheckDef(id: m.allocateId(), nameMode: NameMode.manual, name: 'node_state_ck', expression: "state <> 'closed' OR qty = 0"));
+  node.triggers.add(TriggerDef(
+      id: m.allocateId(),
+      source: TriggerSource.public,
+      methodId: touch.id,
+      events: [TriggerEvent.insert, TriggerEvent.update],
+      updateColumnIds: [node.columns[2].id, node.columns[3].id],
+      args: "'80', 1"));
+  count.dependsOnTableIds = [node.id];
+  final viewFn = MethodDef(
+      id: m.allocateId(),
+      name: 'view_rows',
+      bodies: {for (final d in DbKind.values) d: d == DbKind.postgresql ? 'CREATE FUNCTION view_rows() RETURNS bigint AS \$\$ SELECT count(*) FROM app.v_node \$\$ LANGUAGE sql' : ''});
+  m.methods.add(viewFn);
+  final h = _h(m);
+  final self = AddRelationshipCommand(tableAId: node.id, tableBId: node.id);
+  h.execute(self);
+  h.execute(UpdateRelationshipCommand(self.createdId!, {'deferrable': 'deferred', 'onDelete': 'set_null'}));
+  final other = table(m, 'other', [col(m, 'id', 'auto', pk: true), col(m, 'node_id', 'integer')], x: 500);
+  m.diagrams.first.placements.removeWhere((p) => p.entityId == other.id);
+  m.diagrams.add(Diagram(id: m.allocateId(), name: 'ダイアグラム2', schema: 'other')
+    ..placements.add(Placement(entityId: other.id, x: 40, y: 40)));
+  final fk = AddRelationshipCommand(tableAId: node.id, tableBId: other.id, parentId: node.id);
+  h.execute(fk);
+  h.execute(UpdateRelationshipCommand(fk.createdId!, {'deferrable': 'immediate'}));
+  final v = ViewEntity(
+    id: m.allocateId(),
+    physicalName: 'v_node',
+    comment: 'ノードのビュー',
+    viewType: ViewType.sql,
+    sql: ViewSqlDef(sql: 'SELECT id, name FROM app.node WHERE qty > 0;\n'),
+  );
+  m.entities.add(v);
+  m.diagrams.first.placements.add(Placement(entityId: v.id, x: 300, y: 40));
+  viewFn.dependsOnTableIds = [node.id, v.id]; // ビューへの依存は、ビューの後に出力する
+  return m;
+}
