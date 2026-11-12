@@ -98,13 +98,14 @@ class _CommitTextFieldState extends State<CommitTextField> {
       style: const TextStyle(fontSize: 13),
       decoration: InputDecoration(
         labelText: widget.label,
+        floatingLabelBehavior: FloatingLabelBehavior.always,
         isDense: true,
         errorText: _error,
         border: const OutlineInputBorder(),
         enabledBorder: _error != null
             ? const OutlineInputBorder(borderSide: BorderSide(color: Colors.red))
             : null,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       ),
       onSubmitted: widget.multiline ? null : (_) => _commit(),
       onEditingComplete: widget.multiline ? null : () => _commit(),

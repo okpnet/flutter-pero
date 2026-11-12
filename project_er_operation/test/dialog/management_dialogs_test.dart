@@ -170,8 +170,9 @@ void main() {
         ),
       ),
     ));
-    // 列の「追加」の次がトリガーの「追加」
-    await tester.tap(find.widgetWithText(FilledButton, '追加').at(1));
+    await tester.tap(find.widgetWithText(ChoiceChip, 'トリガー'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '追加'));
     await tester.pumpAndSettle();
     var tr = session.model.tableById(t.id)!.triggers;
     expect(tr.length, 1);
@@ -190,7 +191,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(session.model.tableById(t.id)!.triggers.single.events, [TriggerEvent.update]);
     // 2つ目を追加すると順が名前に入る
-    await tester.tap(find.widgetWithText(FilledButton, '追加').at(1));
+    await tester.tap(find.widgetWithText(FilledButton, '追加'));
     await tester.pumpAndSettle();
     expect(find.text('2. users_trg02'), findsOneWidget);
     // 追加→Undoで戻る

@@ -4,6 +4,14 @@ import '../common/common.dart';
 import '../model/model.dart';
 import '../session/session.dart';
 
+InputDecoration _deco(String label) => InputDecoration(
+  labelText: label,
+  floatingLabelBehavior: FloatingLabelBehavior.always,
+  isDense: true,
+  border: const OutlineInputBorder(),
+  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+);
+
 /// テーブルのトリガー編集(6.5)。一覧(順、名前、タイミング、イベント)、追加、削除、ドラッグ&ドロップによる順の変更。
 /// 変更は [onEdit] へ(テーブルの複製に対する書き換え)渡し、1回の確定を1コマンドにする。
 class TriggerEditor extends StatelessWidget {
@@ -119,7 +127,7 @@ class _TriggerCardState extends State<_TriggerCard> {
             selected: {g.source},
             onSelectionChanged: en ? (s) => widget.onEdit((x) => x.source = s.first) : null,
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 16),
           if (g.source == TriggerSource.public)
             Row(children: [
               Expanded(
@@ -127,7 +135,7 @@ class _TriggerCardState extends State<_TriggerCard> {
                   key: ValueKey('tm${g.id}${g.methodId}'),
                   initialValue: widget.methods.any((x) => x.id == g.methodId) ? g.methodId : null,
                   isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'メソッド(種別がトリガー)', isDense: true, border: OutlineInputBorder()),
+                  decoration: _deco('メソッド(種別がトリガー)'),
                   items: [for (final x in widget.methods) DropdownMenuItem(value: x.id, child: Text(x.name))],
                   onChanged: en ? (v) => widget.onEdit((x) => x.methodId = v) : null,
                 ),
@@ -135,11 +143,15 @@ class _TriggerCardState extends State<_TriggerCard> {
               IconButton(tooltip: 'メソッド管理を開く', icon: const Icon(Icons.more_horiz), onPressed: en ? widget.onManageMethods : null),
             ])
           else ...[
-            DropdownButton<DbKind>(
-              value: _bodyDb,
-              items: [for (final d in DbKind.values) DropdownMenuItem(value: d, child: Text('本体: ${d.wire}'))],
+            DropdownButtonFormField<DbKind>(
+              key: ValueKey('tdb${g.id}${_bodyDb.wire}'),
+              initialValue: _bodyDb,
+              isExpanded: true,
+              decoration: _deco('本体を入力する対象DB'),
+              items: [for (final d in DbKind.values) DropdownMenuItem(value: d, child: Text(d.wire))],
               onChanged: (v) => setState(() => _bodyDb = v ?? _bodyDb),
             ),
+            const SizedBox(height: 16),
             CommitTextField(
               key: ValueKey('tb${g.id}${_bodyDb.wire}'),
               label: '本体(${_bodyDb.wire}。{{table}} {{trigger}} を置換)',
@@ -149,23 +161,24 @@ class _TriggerCardState extends State<_TriggerCard> {
               onCommit: (v) => widget.onEdit((x) => x.inlineBodies[_bodyDb] = v),
             ),
           ],
-          const SizedBox(height: 6),
-          Row(children: [
-            const Text('名前: '),
-            DropdownButton<NameMode>(
-              value: g.nameMode,
-              items: const [
-                DropdownMenuItem(value: NameMode.auto, child: Text('自動')),
-                DropdownMenuItem(value: NameMode.manual, child: Text('手動')),
-              ],
-              onChanged: en
-                  ? (v) => widget.onEdit((x) {
-                        x.nameMode = v ?? NameMode.auto;
-                        if (x.nameMode == NameMode.manual && x.name.isEmpty) x.name = name;
-                      })
-                  : null,
-            ),
-          ]),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<NameMode>(
+            key: ValueKey('tnm${g.id}${g.nameMode}'),
+            initialValue: g.nameMode,
+            isExpanded: true,
+            decoration: _deco('名前の決め方'),
+            items: const [
+              DropdownMenuItem(value: NameMode.auto, child: Text('自動')),
+              DropdownMenuItem(value: NameMode.manual, child: Text('手動')),
+            ],
+            onChanged: en
+                ? (v) => widget.onEdit((x) {
+                      x.nameMode = v ?? NameMode.auto;
+                      if (x.nameMode == NameMode.manual && x.name.isEmpty) x.name = name;
+                    })
+                : null,
+          ),
+          const SizedBox(height: 16),
           if (g.nameMode == NameMode.auto)
             Text(name, style: Theme.of(context).textTheme.bodySmall)
           else
@@ -185,28 +198,27 @@ class _TriggerCardState extends State<_TriggerCard> {
               },
               onCommit: (v) => widget.onEdit((x) => x.name = v),
             ),
-          const SizedBox(height: 6),
-          Row(children: [
-            Expanded(
-              child: DropdownButtonFormField<TriggerTiming>(
-                key: ValueKey('tt${g.id}${g.timing}'),
-                initialValue: g.timing,
-                decoration: const InputDecoration(labelText: 'タイミング', isDense: true, border: OutlineInputBorder()),
-                items: [for (final t in TriggerTiming.values) DropdownMenuItem(value: t, child: Text(t.wire))],
-                onChanged: en ? (v) => widget.onEdit((x) => x.timing = v ?? TriggerTiming.before) : null,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: DropdownButtonFormField<TriggerForEach>(
-                key: ValueKey('tf${g.id}${g.forEach}'),
-                initialValue: g.forEach,
-                decoration: const InputDecoration(labelText: '行単位', isDense: true, border: OutlineInputBorder()),
-                items: [for (final t in TriggerForEach.values) DropdownMenuItem(value: t, child: Text(t.wire))],
-                onChanged: en ? (v) => widget.onEdit((x) => x.forEach = v ?? TriggerForEach.row) : null,
-              ),
-            ),
-          ]),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<TriggerTiming>(
+            key: ValueKey('tt${g.id}${g.timing}'),
+            initialValue: g.timing,
+            isExpanded: true,
+            decoration: _deco('タイミング'),
+            items: [for (final t in TriggerTiming.values) DropdownMenuItem(value: t, child: Text(t.wire))],
+            onChanged: en ? (v) => widget.onEdit((x) => x.timing = v ?? TriggerTiming.before) : null,
+          ),
+          const SizedBox(height: 16),
+          DropdownButtonFormField<TriggerForEach>(
+            key: ValueKey('tf${g.id}${g.forEach}'),
+            initialValue: g.forEach,
+            isExpanded: true,
+            decoration: _deco('行単位'),
+            items: [for (final t in TriggerForEach.values) DropdownMenuItem(value: t, child: Text(t.wire))],
+            onChanged: en ? (v) => widget.onEdit((x) => x.forEach = v ?? TriggerForEach.row) : null,
+          ),
+          const SizedBox(height: 16),
+          Text('イベント', style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 4),
           Wrap(spacing: 6, children: [
             for (final e in TriggerEvent.values)
               FilterChip(
@@ -223,7 +235,7 @@ class _TriggerCardState extends State<_TriggerCard> {
                     : null,
               ),
           ]),
-          const SizedBox(height: 6),
+          const SizedBox(height: 16),
           CommitTextField(
             key: ValueKey('tw${g.id}'),
             label: '条件(WHEN)',

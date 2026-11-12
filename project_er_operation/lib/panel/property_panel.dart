@@ -8,7 +8,8 @@ import '../session/session.dart';
 import 'trigger_editor.dart';
 
 /// プロパティペイン(3.6)。右ペイン上。
-class PropertyPanel extends StatelessWidget {
+/// 項目は機能別のタブに分け、入力欄は1項目1行で縦に並べる(3.6-7、3.6-8)。
+class PropertyPanel extends StatefulWidget {
   const PropertyPanel({
     super.key,
     required this.session,
@@ -28,59 +29,179 @@ class PropertyPanel extends StatelessWidget {
   final Future<void> Function(int viewId) onEditFunctionView;
 
   @override
+  State<PropertyPanel> createState() => _PropertyPanelState();
+}
+
+/// 選択するオブジェクトの種類ごとのタブ。
+class _Kind {
+  const _Kind(this.name, this.tabs);
+  final String name;
+  final List<String> tabs;
+}
+
+const _modelKind = _Kind('model', ['モデル', 'ダイアグラム']);
+const _tableKind = _Kind('table', ['基本', '列', '制約', 'トリガー', 'クエリ']);
+const _viewKind = _Kind('view', ['基本', '定義', 'クエリ']);
+const _relKind = _Kind('rel', ['基本', '列対応', '参照規則']);
+
+class _PropertyPanelState extends State<PropertyPanel> {
+  /// 種類ごとの選択中のタブ。同じ種類の間は保持する(3.6-7)。
+  final Map<String, int> _tab = {};
+
+  @override
   Widget build(BuildContext context) {
+    final session = widget.session;
     final sel = session.selection.toList();
-    final Widget body;
-    if (sel.isEmpty) {
-      body = _ModelProps(session: session);
-    } else if (sel.length > 1) {
-      body = _MultiProps(session: session, ids: sel);
-    } else {
-      final id = sel.single;
-      final e = session.model.entityById(id);
-      final r = session.model.relationshipById(id);
-      if (e is TableEntity) {
-        body = _TableProps(
-          key: ValueKey('t$id'),
-          session: session,
-          id: id,
-          nameFocus: nameFocus,
-          onManageMethods: onManageMethods,
-        );
-      } else if (e is ViewEntity) {
-        body = _ViewProps(
-          key: ValueKey('v$id'),
-          session: session,
-          id: id,
-          nameFocus: nameFocus,
-          onEdit: () => onEditFunctionView(id),
-        );
-      } else if (r != null) {
-        body = _RelationshipProps(
-          key: ValueKey('r$id'),
-          session: session,
-          id: id,
-        );
-      } else {
-        body = _ModelProps(session: session);
-      }
+    if (sel.length > 1) {
+      return ListView(
+        padding: _padding,
+        children: [_MultiProps(session: session, ids: sel)],
+      );
     }
-    return ListView(padding: const EdgeInsets.all(8), children: [body]);
+    final id = sel.isEmpty ? null : sel.single;
+    final e = id == null ? null : session.model.entityById(id);
+    final r = id == null ? null : session.model.relationshipById(id);
+    final _Kind kind = e is TableEntity
+        ? _tableKind
+        : e is ViewEntity
+        ? _viewKind
+        : r != null
+        ? _relKind
+        : _modelKind;
+    final tab = (_tab[kind.name] ?? 0).clamp(0, kind.tabs.length - 1);
+
+    final Widget body;
+    if (e is TableEntity) {
+      body = _TableProps(
+        key: ValueKey('t$id'),
+        session: session,
+        id: id!,
+        tab: tab,
+        nameFocus: widget.nameFocus,
+        onManageMethods: widget.onManageMethods,
+      );
+    } else if (e is ViewEntity) {
+      body = _ViewProps(
+        key: ValueKey('v$id'),
+        session: session,
+        id: id!,
+        tab: tab,
+        nameFocus: widget.nameFocus,
+        onEdit: () => widget.onEditFunctionView(id),
+      );
+    } else if (r != null) {
+      body = _RelationshipProps(
+        key: ValueKey('r$id'),
+        session: session,
+        id: id!,
+        tab: tab,
+      );
+    } else {
+      body = _ModelProps(session: session, tab: tab);
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _TabStrip(
+          labels: kind.tabs,
+          index: tab,
+          onChanged: (i) => setState(() => _tab[kind.name] = i),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: ListView(
+            key: ValueKey('props-${kind.name}-$tab'),
+            padding: _padding,
+            children: [body],
+          ),
+        ),
+      ],
+    );
   }
 }
 
-Widget _gap([double h = 8]) => SizedBox(height: h);
+const EdgeInsets _padding = EdgeInsets.fromLTRB(12, 12, 12, 24);
 
-Widget _section(BuildContext context, String title) => Padding(
-  padding: const EdgeInsets.only(top: 12, bottom: 4),
-  child: Text(title, style: Theme.of(context).textTheme.titleSmall),
+/// タブの見出し(幅が狭いときは折り返す)。
+class _TabStrip extends StatelessWidget {
+  const _TabStrip({
+    required this.labels,
+    required this.index,
+    required this.onChanged,
+  });
+  final List<String> labels;
+  final int index;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: [
+          for (var i = 0; i < labels.length; i++)
+            ChoiceChip(
+              label: Text(labels[i]),
+              selected: i == index,
+              visualDensity: VisualDensity.compact,
+              onSelected: (_) => onChanged(i),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 入力欄の行間(3.6-8)。
+Widget _gap([double h = 16]) => SizedBox(height: h);
+
+/// 入力欄の見た目。ラベルは入力欄の上に置く(3.6-8)。
+InputDecoration _deco(String label) => InputDecoration(
+  labelText: label,
+  floatingLabelBehavior: FloatingLabelBehavior.always,
+  isDense: true,
+  border: const OutlineInputBorder(),
+  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+);
+
+Widget _hint(BuildContext context, String text) =>
+    Text(text, style: Theme.of(context).textTheme.bodySmall);
+
+/// 選択肢の入力欄(1項目1行)。
+Widget _dropdown<T>({
+  required Key key,
+  required String label,
+  required T? value,
+  required List<DropdownMenuItem<T>> items,
+  required ValueChanged<T?>? onChanged,
+}) => DropdownButtonFormField<T>(
+  key: key,
+  initialValue: value,
+  isExpanded: true,
+  decoration: _deco(label),
+  items: items,
+  onChanged: onChanged,
+);
+
+Widget _switch(
+  String title,
+  bool value,
+  ValueChanged<bool>? onChanged,
+) => SwitchListTile(
+  contentPadding: EdgeInsets.zero,
+  title: Text(title),
+  value: value,
+  onChanged: onChanged,
 );
 
 // ---- モデル・ダイアグラム ----
 
 class _ModelProps extends StatelessWidget {
-  const _ModelProps({required this.session});
+  const _ModelProps({required this.session, required this.tab});
   final EditorSession session;
+  final int tab;
 
   @override
   Widget build(BuildContext context) {
@@ -89,61 +210,63 @@ class _ModelProps extends StatelessWidget {
     final d = session.diagram;
     void upd(Map<String, Object?> patch) =>
         session.run(UpdateModelPropertiesCommand(patch));
+    if (tab == 0) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          CommitTextField(
+            key: const ValueKey('outName'),
+            label: '出力ファイル名',
+            value: p.outputFileName,
+            onCommit: (v) => upd({'outputFileName': v}),
+          ),
+          _gap(),
+          CommitTextField(
+            key: const ValueKey('outFolder'),
+            label: '出力フォルダ',
+            value: p.outputFolder,
+            onCommit: (v) => upd({'outputFolder': v}),
+          ),
+          _gap(),
+          _dropdown<DbKind>(
+            key: ValueKey('db${p.targetDb}'),
+            label: '対象のデータベース',
+            value: p.targetDb,
+            items: [
+              for (final k in DbKind.values)
+                DropdownMenuItem(value: k, child: Text(k.wire)),
+            ],
+            onChanged: (v) => v == null ? null : upd({'targetDb': v.wire}),
+          ),
+          _gap(),
+          CommitTextField(
+            key: const ValueKey('postPath'),
+            label: 'ポストファイルのパス',
+            value: p.postPath,
+            onCommit: (v) => upd({'postPath': v}),
+          ),
+          _gap(),
+          CommitTextField(
+            key: const ValueKey('startQ'),
+            label: '開始クエリ',
+            value: p.startQuery,
+            multiline: true,
+            onCommit: (v) => upd({'startQuery': v}),
+          ),
+          _gap(),
+          CommitTextField(
+            key: const ValueKey('endQ'),
+            label: '終了クエリ',
+            value: p.endQuery,
+            multiline: true,
+            onCommit: (v) => upd({'endQuery': v}),
+          ),
+        ],
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _section(context, 'モデル'),
-        CommitTextField(
-          key: const ValueKey('outName'),
-          label: '出力ファイル名',
-          value: p.outputFileName,
-          onCommit: (v) => upd({'outputFileName': v}),
-        ),
-        _gap(),
-        CommitTextField(
-          key: const ValueKey('outFolder'),
-          label: '出力フォルダ',
-          value: p.outputFolder,
-          onCommit: (v) => upd({'outputFolder': v}),
-        ),
-        _gap(),
-        DropdownButtonFormField<DbKind>(
-          initialValue: p.targetDb,
-          decoration: const InputDecoration(
-            labelText: '対象のデータベース',
-            isDense: true,
-            border: OutlineInputBorder(),
-          ),
-          items: [
-            for (final k in DbKind.values)
-              DropdownMenuItem(value: k, child: Text(k.wire)),
-          ],
-          onChanged: (v) => v == null ? null : upd({'targetDb': v.wire}),
-        ),
-        _gap(),
-        CommitTextField(
-          key: const ValueKey('postPath'),
-          label: 'ポストファイルのパス',
-          value: p.postPath,
-          onCommit: (v) => upd({'postPath': v}),
-        ),
-        _gap(),
-        CommitTextField(
-          key: const ValueKey('startQ'),
-          label: '開始クエリ',
-          value: p.startQuery,
-          multiline: true,
-          onCommit: (v) => upd({'startQuery': v}),
-        ),
-        _gap(),
-        CommitTextField(
-          key: const ValueKey('endQ'),
-          label: '終了クエリ',
-          value: p.endQuery,
-          multiline: true,
-          onCommit: (v) => upd({'endQuery': v}),
-        ),
-        _section(context, 'ダイアグラム'),
         CommitTextField(
           key: ValueKey('dn${d.id}'),
           label: '名前',
@@ -160,14 +283,10 @@ class _ModelProps extends StatelessWidget {
           onCommit: (v) => session.run(RenameDiagramCommand(d.id, v)),
         ),
         _gap(),
-        DropdownButtonFormField<PageSize>(
+        _dropdown<PageSize>(
           key: ValueKey('ps${d.id}${d.pageSize}'),
-          initialValue: d.pageSize,
-          decoration: const InputDecoration(
-            labelText: '用紙サイズ',
-            isDense: true,
-            border: OutlineInputBorder(),
-          ),
+          label: '用紙サイズ',
+          value: d.pageSize,
           items: [
             for (final k in PageSize.values)
               DropdownMenuItem(value: k, child: Text(k.wire)),
@@ -177,14 +296,10 @@ class _ModelProps extends StatelessWidget {
               : session.run(UpdateDiagramPageCommand(d.id, v, d.orientation)),
         ),
         _gap(),
-        DropdownButtonFormField<Orientation>(
+        _dropdown<Orientation>(
           key: ValueKey('or${d.id}${d.orientation}'),
-          initialValue: d.orientation,
-          decoration: const InputDecoration(
-            labelText: '向き',
-            isDense: true,
-            border: OutlineInputBorder(),
-          ),
+          label: '向き',
+          value: d.orientation,
           items: const [
             DropdownMenuItem(value: Orientation.landscape, child: Text('横')),
             DropdownMenuItem(value: Orientation.portrait, child: Text('縦')),
@@ -217,12 +332,8 @@ class _MultiProps extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('${ids.length}${Strings.selectedCount}'),
-        SwitchListTile(
-          dense: true,
-          title: const Text('ロック'),
-          value: all,
-          onChanged: (v) => session.run(SetLockedCommand(ids, v)),
-        ),
+        _gap(),
+        _switch('ロック', all, (v) => session.run(SetLockedCommand(ids, v))),
       ],
     );
   }
@@ -261,11 +372,13 @@ class _TableProps extends StatelessWidget {
     super.key,
     required this.session,
     required this.id,
+    required this.tab,
     required this.nameFocus,
     required this.onManageMethods,
   });
   final EditorSession session;
   final int id;
+  final int tab;
   final FocusNode nameFocus;
   final Future<void> Function() onManageMethods;
 
@@ -283,54 +396,79 @@ class _TableProps extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = _t;
     if (t == null) return const SizedBox();
-    final m = session.model;
     final dis = t.locked; // ロック中はロック以外を無効表示(5.3-2-5)
+    return switch (tab) {
+      0 => _basic(t, dis),
+      1 => _columns(context, t, dis),
+      2 => _constraints(t, dis),
+      3 => TriggerEditor(
+        session: session,
+        table: t,
+        enabled: !dis,
+        onEdit: _edit,
+        onManageMethods: onManageMethods,
+      ),
+      _ => _queries(t, dis),
+    };
+  }
+
+  Widget _basic(TableEntity t, bool dis) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      CommitTextField(
+        key: ValueKey('tl$id'),
+        label: '論理名',
+        value: t.logicalName,
+        enabled: !dis,
+        focusNode: nameFocus,
+        onCommit: (v) => _edit((c) => c.logicalName = v),
+      ),
+      _gap(),
+      CommitTextField(
+        key: ValueKey('tp$id'),
+        label: '物理名',
+        value: t.physicalName,
+        enabled: !dis,
+        validator: (v) => _physicalNameError(session, v, entityId: id),
+        onCommit: (v) => _edit((c) => c.physicalName = v),
+      ),
+      _gap(),
+      CommitTextField(
+        key: ValueKey('tc$id'),
+        label: 'コメント',
+        value: t.comment,
+        enabled: !dis,
+        multiline: true,
+        onCommit: (v) => _edit((c) => c.comment = v),
+      ),
+      _gap(),
+      _switch(
+        'ロック',
+        t.locked,
+        (v) => session.run(SetLockedCommand([id], v)),
+      ),
+    ],
+  );
+
+  Widget _columns(BuildContext context, TableEntity t, bool dis) {
+    final m = session.model;
     final exp = m.expand(t).columns;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _section(context, 'テーブル'),
-        CommitTextField(
-          key: ValueKey('tl$id'),
-          label: '論理名',
-          value: t.logicalName,
-          enabled: !dis,
-          focusNode: nameFocus,
-          onCommit: (v) => _edit((c) => c.logicalName = v),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.tonalIcon(
+            onPressed: dis ? null : () => session.run(AddColumnCommand(id)),
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('列を追加'),
+          ),
         ),
-        _gap(),
-        CommitTextField(
-          key: ValueKey('tp$id'),
-          label: '物理名',
-          value: t.physicalName,
-          enabled: !dis,
-          validator: (v) => _physicalNameError(session, v, entityId: id),
-          onCommit: (v) => _edit((c) => c.physicalName = v),
-        ),
-        _gap(),
-        CommitTextField(
-          key: ValueKey('tc$id'),
-          label: 'コメント',
-          value: t.comment,
-          enabled: !dis,
-          multiline: true,
-          onCommit: (v) => _edit((c) => c.comment = v),
-        ),
-        _section(context, '列'),
-        Row(
-          children: [
-            FilledButton.tonalIcon(
-              onPressed: dis ? null : () => session.run(AddColumnCommand(id)),
-              icon: const Icon(Icons.add, size: 16),
-              label: const Text('追加'),
-            ),
-          ],
-        ),
-        _gap(4),
+        _gap(8),
         ReorderableListView(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          buildDefaultDragHandles: !dis,
+          buildDefaultDragHandles: false,
           onReorderItem: (from, to) {
             if (dis) return;
             _edit((c) {
@@ -339,16 +477,22 @@ class _TableProps extends StatelessWidget {
             });
           },
           children: [
-            for (final col in t.columns)
+            for (var i = 0; i < t.columns.length; i++)
               _ColumnEditor(
-                key: ValueKey('col${col.id}'),
+                key: ValueKey('col${t.columns[i].id}'),
                 session: session,
                 table: t,
-                column: col,
+                column: t.columns[i],
+                index: i,
                 enabled: !dis,
-                onEdit: (f) => _edit((c) => f(c.columnById(col.id)!)),
-                onDelete: () =>
-                    deleteColumnWithConfirm(context, session, t.id, col.id),
+                onEdit: (f) =>
+                    _edit((c) => f(c.columnById(t.columns[i].id)!)),
+                onDelete: () => deleteColumnWithConfirm(
+                  context,
+                  session,
+                  t.id,
+                  t.columns[i].id,
+                ),
                 onManageMethods: onManageMethods,
               ),
           ],
@@ -365,7 +509,15 @@ class _TableProps extends StatelessWidget {
               subtitle: Text('共通列(パターン: ${x.patternName})  読み取り専用'),
             ),
           ),
-        _section(context, '制約'),
+      ],
+    );
+  }
+
+  Widget _constraints(TableEntity t, bool dis) {
+    final m = session.model;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
         _ConstraintsEditor(
           title: 'インデックス',
           list: t.indexes,
@@ -375,6 +527,7 @@ class _TableProps extends StatelessWidget {
           nameOf: (c) => m.indexName(t, c),
           onChange: (f) => _edit((c) => f(c.indexes)),
         ),
+        _gap(24),
         _ConstraintsEditor(
           title: 'ユニーク',
           list: t.uniques,
@@ -384,41 +537,32 @@ class _TableProps extends StatelessWidget {
           nameOf: (c) => m.uniqueName(t, c),
           onChange: (f) => _edit((c) => f(c.uniques)),
         ),
-        _section(context, 'クエリ'),
-        CommitTextField(
-          key: ValueKey('tpre$id'),
-          label: 'テーブル生成前実行クエリ',
-          value: t.preQuery,
-          enabled: !dis,
-          multiline: true,
-          onCommit: (v) => _edit((c) => c.preQuery = v),
-        ),
-        _gap(),
-        CommitTextField(
-          key: ValueKey('tpost$id'),
-          label: 'テーブル生成後実行クエリ',
-          value: t.postQuery,
-          enabled: !dis,
-          multiline: true,
-          onCommit: (v) => _edit((c) => c.postQuery = v),
-        ),
-        _section(context, 'トリガー'),
-        TriggerEditor(
-          session: session,
-          table: t,
-          enabled: !dis,
-          onEdit: _edit,
-          onManageMethods: onManageMethods,
-        ),
-        SwitchListTile(
-          dense: true,
-          title: const Text('ロック'),
-          value: t.locked,
-          onChanged: (v) => session.run(SetLockedCommand([id], v)),
-        ),
       ],
     );
   }
+
+  Widget _queries(TableEntity t, bool dis) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      CommitTextField(
+        key: ValueKey('tpre$id'),
+        label: 'テーブル生成前実行クエリ',
+        value: t.preQuery,
+        enabled: !dis,
+        multiline: true,
+        onCommit: (v) => _edit((c) => c.preQuery = v),
+      ),
+      _gap(),
+      CommitTextField(
+        key: ValueKey('tpost$id'),
+        label: 'テーブル生成後実行クエリ',
+        value: t.postQuery,
+        enabled: !dis,
+        multiline: true,
+        onCommit: (v) => _edit((c) => c.postQuery = v),
+      ),
+    ],
+  );
 }
 
 /// 列の削除(影響の確認つき。6.2-7)。
@@ -449,12 +593,14 @@ Future<void> deleteColumnWithConfirm(
   if (ok) s.run(RemoveColumnCommand(entityId, columnId));
 }
 
+/// 列の編集。見出しに要約を表示し、開くと項目を1項目1行で縦に並べる(スクロール量を減らす)。
 class _ColumnEditor extends StatelessWidget {
   const _ColumnEditor({
     super.key,
     required this.session,
     required this.table,
     required this.column,
+    required this.index,
     required this.enabled,
     required this.onEdit,
     required this.onDelete,
@@ -463,6 +609,7 @@ class _ColumnEditor extends StatelessWidget {
   final EditorSession session;
   final TableEntity table;
   final ColumnDef column;
+  final int index;
   final bool enabled;
   final void Function(void Function(ColumnDef c) f) onEdit;
   final VoidCallback onDelete;
@@ -482,255 +629,212 @@ class _ColumnEditor extends StatelessWidget {
     final methods = m.methods
         .where((x) => x.kind == MethodKind.function)
         .toList();
+    final summary = [
+      m.typeLabel(c),
+      if (c.pk) 'PK',
+      if (c.notNull && !c.pk) 'NotNull',
+      if (inUse) 'FK',
+    ].join('  ');
     return Card(
-      margin: const EdgeInsets.symmetric(vertical: 3),
+      margin: const EdgeInsets.symmetric(vertical: 4),
       color: inUse ? Colors.amber.withValues(alpha: 0.12) : null,
-      child: Padding(
-        padding: const EdgeInsets.all(6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: CommitTextField(
-                    key: ValueKey('cl${c.id}'),
-                    label: '論理名',
-                    value: c.logicalName,
-                    enabled: enabled,
-                    onCommit: (v) => onEdit((x) => x.logicalName = v),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: CommitTextField(
-                    key: ValueKey('cp${c.id}'),
-                    label: '物理名',
-                    value: c.physicalName,
-                    enabled: enabled,
-                    validator: (v) => _physicalNameError(
-                      session,
-                      v,
-                      inTable: table,
-                      columnId: c.id,
-                    ),
-                    onCommit: (v) => onEdit((x) => x.physicalName = v),
-                  ),
-                ),
-                IconButton(
-                  tooltip: '列を削除',
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  onPressed: enabled ? onDelete : null,
-                ),
-              ],
+      child: ExpansionTile(
+        key: ValueKey('colTile${c.id}'),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+        leading: ReorderableDragStartListener(
+          index: index,
+          enabled: enabled,
+          child: const Icon(Icons.drag_indicator, size: 20),
+        ),
+        title: Text(
+          c.physicalName.isEmpty ? '(物理名なし)' : c.physicalName,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          c.logicalName.isEmpty ? summary : '${c.logicalName}  $summary',
+          style: const TextStyle(fontSize: 11),
+        ),
+        children: [
+          _gap(8),
+          CommitTextField(
+            key: ValueKey('cl${c.id}'),
+            label: '論理名',
+            value: c.logicalName,
+            enabled: enabled,
+            onCommit: (v) => onEdit((x) => x.logicalName = v),
+          ),
+          _gap(),
+          CommitTextField(
+            key: ValueKey('cp${c.id}'),
+            label: '物理名',
+            value: c.physicalName,
+            enabled: enabled,
+            validator: (v) => _physicalNameError(
+              session,
+              v,
+              inTable: table,
+              columnId: c.id,
             ),
-            const SizedBox(height: 4),
+            onCommit: (v) => onEdit((x) => x.physicalName = v),
+          ),
+          _gap(),
+          _dropdown<String>(
+            key: ValueKey('ct${c.id}${c.typeId}'),
+            label: '型',
+            value: type == null ? null : c.typeId,
+            items: [
+              for (final t in m.types)
+                DropdownMenuItem(
+                  value: t.id,
+                  child: Text(t.displayName, overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: !enabled
+                ? null
+                : (v) {
+                    if (v == null) return;
+                    final t = m.typeById(v)!;
+                    onEdit((x) {
+                      x.typeId = v;
+                      x.length = t.paramKind == ParamKind.length
+                          ? t.defaultLength
+                          : null;
+                      x.precision = t.paramKind == ParamKind.precisionScale
+                          ? t.defaultPrecision
+                          : null;
+                      x.scale = t.paramKind == ParamKind.precisionScale
+                          ? t.defaultScale
+                          : null;
+                      if (t.category == TypeCategory.auto) {
+                        x.defaultKind = DefaultKind.none;
+                      }
+                    });
+                  },
+          ),
+          if (type?.paramKind == ParamKind.length) ...[
+            _gap(),
+            _intField(
+              'cn${c.id}',
+              '長さ',
+              c.length,
+              enabled,
+              (v) => onEdit((x) => x.length = v),
+            ),
+          ],
+          if (type?.paramKind == ParamKind.precisionScale) ...[
+            _gap(),
+            _intField(
+              'cpr${c.id}',
+              '精度',
+              c.precision,
+              enabled,
+              (v) => onEdit((x) => x.precision = v),
+            ),
+            _gap(),
+            _intField(
+              'csc${c.id}',
+              'スケール',
+              c.scale,
+              enabled,
+              (v) => onEdit((x) => x.scale = v),
+            ),
+          ],
+          _gap(8),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text('PK(主キー)'),
+            value: c.pk,
+            onChanged: enabled
+                ? (v) => onEdit((x) {
+                    x.pk = v ?? false;
+                    if (x.pk) x.notNull = true;
+                  })
+                : null,
+          ),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text('NotNull'),
+            value: c.notNull || c.pk,
+            onChanged: enabled && !c.pk
+                ? (v) => onEdit((x) => x.notNull = v ?? false)
+                : null,
+          ),
+          _gap(8),
+          _dropdown<DefaultKind>(
+            key: ValueKey('cdk${c.id}${c.defaultKind}$isAuto'),
+            label: 'デフォルト',
+            value: isAuto ? DefaultKind.none : c.defaultKind,
+            items: const [
+              DropdownMenuItem(value: DefaultKind.none, child: Text('なし')),
+              DropdownMenuItem(value: DefaultKind.value, child: Text('値')),
+              DropdownMenuItem(
+                value: DefaultKind.method,
+                child: Text('メソッド'),
+              ),
+            ],
+            onChanged: enabled && !isAuto
+                ? (v) => onEdit((x) => x.defaultKind = v ?? DefaultKind.none)
+                : null,
+          ),
+          _gap(),
+          if (c.defaultKind == DefaultKind.method && !isAuto)
             Row(
               children: [
                 Expanded(
-                  flex: 3,
-                  child: DropdownButtonFormField<String>(
-                    key: ValueKey('ct${c.id}${c.typeId}'),
-                    initialValue: m.typeById(c.typeId) == null
-                        ? null
-                        : c.typeId,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: '型',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
+                  child: _dropdown<int>(
+                    key: ValueKey('cdm${c.id}${c.defaultMethodId}'),
+                    label: 'メソッド',
+                    value: methods.any((x) => x.id == c.defaultMethodId)
+                        ? c.defaultMethodId
+                        : null,
                     items: [
-                      for (final t in m.types)
-                        DropdownMenuItem(
-                          value: t.id,
-                          child: Text(
-                            t.displayName,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
+                      for (final x in methods)
+                        DropdownMenuItem(value: x.id, child: Text(x.name)),
                     ],
-                    onChanged: !enabled
-                        ? null
-                        : (v) {
-                            if (v == null) return;
-                            final t = m.typeById(v)!;
-                            onEdit((x) {
-                              x.typeId = v;
-                              x.length = t.paramKind == ParamKind.length
-                                  ? t.defaultLength
-                                  : null;
-                              x.precision =
-                                  t.paramKind == ParamKind.precisionScale
-                                  ? t.defaultPrecision
-                                  : null;
-                              x.scale = t.paramKind == ParamKind.precisionScale
-                                  ? t.defaultScale
-                                  : null;
-                              if (t.category == TypeCategory.auto) {
-                                x.defaultKind = DefaultKind.none;
-                              }
-                            });
-                          },
-                  ),
-                ),
-                if (type?.paramKind == ParamKind.length) ...[
-                  const SizedBox(width: 4),
-                  Expanded(
-                    flex: 2,
-                    child: _intField(
-                      'cn${c.id}',
-                      '長さ',
-                      c.length,
-                      enabled,
-                      (v) => onEdit((x) => x.length = v),
-                    ),
-                  ),
-                ],
-                if (type?.paramKind == ParamKind.precisionScale) ...[
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: _intField(
-                      'cpr${c.id}',
-                      '精度',
-                      c.precision,
-                      enabled,
-                      (v) => onEdit((x) => x.precision = v),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: _intField(
-                      'csc${c.id}',
-                      'スケール',
-                      c.scale,
-                      enabled,
-                      (v) => onEdit((x) => x.scale = v),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            Row(
-              children: [
-                Checkbox(
-                  value: c.pk,
-                  onChanged: enabled
-                      ? (v) => onEdit((x) {
-                          x.pk = v ?? false;
-                          if (x.pk) x.notNull = true;
-                        })
-                      : null,
-                ),
-                const Text('PK'),
-                const SizedBox(width: 8),
-                Checkbox(
-                  value: c.notNull || c.pk,
-                  onChanged: enabled && !c.pk
-                      ? (v) => onEdit((x) => x.notNull = v ?? false)
-                      : null,
-                ),
-                const Text('NotNull'),
-              ],
-            ),
-            Row(
-              children: [
-                SizedBox(
-                  width: 96,
-                  child: DropdownButtonFormField<DefaultKind>(
-                    key: ValueKey('cdk${c.id}${c.defaultKind}$isAuto'),
-                    initialValue: isAuto ? DefaultKind.none : c.defaultKind,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'デフォルト',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: DefaultKind.none,
-                        child: Text('なし'),
-                      ),
-                      DropdownMenuItem(
-                        value: DefaultKind.value,
-                        child: Text('値'),
-                      ),
-                      DropdownMenuItem(
-                        value: DefaultKind.method,
-                        child: Text('メソッド'),
-                      ),
-                    ],
-                    onChanged: enabled && !isAuto
-                        ? (v) => onEdit(
-                            (x) => x.defaultKind = v ?? DefaultKind.none,
-                          )
+                    onChanged: enabled
+                        ? (v) => onEdit((x) => x.defaultMethodId = v)
                         : null,
                   ),
                 ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: c.defaultKind == DefaultKind.method && !isAuto
-                      ? Row(
-                          children: [
-                            Expanded(
-                              child: DropdownButtonFormField<int>(
-                                key: ValueKey('cdm${c.id}${c.defaultMethodId}'),
-                                initialValue:
-                                    methods.any(
-                                      (x) => x.id == c.defaultMethodId,
-                                    )
-                                    ? c.defaultMethodId
-                                    : null,
-                                isExpanded: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'メソッド',
-                                  isDense: true,
-                                  border: OutlineInputBorder(),
-                                ),
-                                items: [
-                                  for (final x in methods)
-                                    DropdownMenuItem(
-                                      value: x.id,
-                                      child: Text(x.name),
-                                    ),
-                                ],
-                                onChanged: enabled
-                                    ? (v) =>
-                                          onEdit((x) => x.defaultMethodId = v)
-                                    : null,
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: 'メソッド管理を開く',
-                              icon: const Icon(Icons.more_horiz, size: 18),
-                              onPressed: enabled ? onManageMethods : null,
-                            ),
-                          ],
-                        )
-                      : CommitTextField(
-                          key: ValueKey('cdv${c.id}'),
-                          label: '値',
-                          value: c.defaultValue,
-                          enabled:
-                              enabled &&
-                              c.defaultKind == DefaultKind.value &&
-                              !isAuto,
-                          validator: (v) => v.isEmpty ? '値は空にできません' : null,
-                          onCommit: (v) => onEdit((x) => x.defaultValue = v),
-                        ),
+                IconButton(
+                  tooltip: 'メソッド管理を開く',
+                  icon: const Icon(Icons.more_horiz, size: 18),
+                  onPressed: enabled ? onManageMethods : null,
                 ),
               ],
-            ),
-            const SizedBox(height: 4),
+            )
+          else
             CommitTextField(
-              key: ValueKey('cm${c.id}'),
-              label: 'コメント',
-              value: c.comment,
-              enabled: enabled,
-              onCommit: (v) => onEdit((x) => x.comment = v),
+              key: ValueKey('cdv${c.id}'),
+              label: 'デフォルト値',
+              value: c.defaultValue,
+              enabled:
+                  enabled && c.defaultKind == DefaultKind.value && !isAuto,
+              validator: (v) => v.isEmpty ? '値は空にできません' : null,
+              onCommit: (v) => onEdit((x) => x.defaultValue = v),
             ),
-          ],
-        ),
+          _gap(),
+          CommitTextField(
+            key: ValueKey('cm${c.id}'),
+            label: 'コメント',
+            value: c.comment,
+            enabled: enabled,
+            onCommit: (v) => onEdit((x) => x.comment = v),
+          ),
+          _gap(8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: enabled ? onDelete : null,
+              icon: const Icon(Icons.delete_outline, size: 18),
+              label: const Text('この列を削除'),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -782,10 +886,10 @@ class _ConstraintsEditor extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(child: Text(title)),
-            IconButton(
-              tooltip: '$titleを追加',
-              icon: const Icon(Icons.add, size: 18),
+            Expanded(
+              child: Text(title, style: Theme.of(context).textTheme.titleSmall),
+            ),
+            FilledButton.tonalIcon(
               onPressed: enabled && cols.isNotEmpty
                   ? () => onChange(
                       (l) => l.add(
@@ -796,14 +900,17 @@ class _ConstraintsEditor extends StatelessWidget {
                       ),
                     )
                   : null,
+              icon: const Icon(Icons.add, size: 16),
+              label: const Text('追加'),
             ),
           ],
         ),
+        _gap(8),
         for (final c in list)
           Card(
-            margin: const EdgeInsets.symmetric(vertical: 2),
+            margin: const EdgeInsets.symmetric(vertical: 4),
             child: Padding(
-              padding: const EdgeInsets.all(6),
+              padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -815,29 +922,8 @@ class _ConstraintsEditor extends StatelessWidget {
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                       ),
-                      DropdownButton<NameMode>(
-                        value: c.nameMode,
-                        items: const [
-                          DropdownMenuItem(
-                            value: NameMode.auto,
-                            child: Text('自動'),
-                          ),
-                          DropdownMenuItem(
-                            value: NameMode.manual,
-                            child: Text('手動'),
-                          ),
-                        ],
-                        onChanged: enabled
-                            ? (v) => onChange((l) {
-                                final x = l.firstWhere((e) => e.id == c.id);
-                                x.nameMode = v ?? NameMode.auto;
-                                if (x.nameMode == NameMode.manual && x.name.isEmpty) {
-                                  x.name = nameOf(c);
-                                }
-                              })
-                            : null,
-                      ),
                       IconButton(
+                        tooltip: '削除',
                         icon: const Icon(Icons.delete_outline, size: 18),
                         onPressed: enabled
                             ? () => onChange(
@@ -847,7 +933,30 @@ class _ConstraintsEditor extends StatelessWidget {
                       ),
                     ],
                   ),
-                  if (c.nameMode == NameMode.manual)
+                  _dropdown<NameMode>(
+                    key: ValueKey('nm${c.id}${c.nameMode}'),
+                    label: '名前の決め方',
+                    value: c.nameMode,
+                    items: const [
+                      DropdownMenuItem(value: NameMode.auto, child: Text('自動')),
+                      DropdownMenuItem(
+                        value: NameMode.manual,
+                        child: Text('手動'),
+                      ),
+                    ],
+                    onChanged: enabled
+                        ? (v) => onChange((l) {
+                            final x = l.firstWhere((e) => e.id == c.id);
+                            x.nameMode = v ?? NameMode.auto;
+                            if (x.nameMode == NameMode.manual &&
+                                x.name.isEmpty) {
+                              x.name = nameOf(c);
+                            }
+                          })
+                        : null,
+                  ),
+                  if (c.nameMode == NameMode.manual) ...[
+                    _gap(),
                     CommitTextField(
                       key: ValueKey('cn${c.id}'),
                       label: '制約名',
@@ -858,8 +967,13 @@ class _ConstraintsEditor extends StatelessWidget {
                         (l) => l.firstWhere((e) => e.id == c.id).name = v,
                       ),
                     ),
+                  ],
+                  _gap(),
+                  Text('列', style: Theme.of(context).textTheme.bodySmall),
+                  _gap(4),
                   Wrap(
-                    spacing: 4,
+                    spacing: 6,
+                    runSpacing: 4,
                     children: [
                       for (final x in cols)
                         FilterChip(
@@ -900,11 +1014,13 @@ class _ViewProps extends StatelessWidget {
     super.key,
     required this.session,
     required this.id,
+    required this.tab,
     required this.nameFocus,
     required this.onEdit,
   });
   final EditorSession session;
   final int id;
+  final int tab;
   final FocusNode nameFocus;
   final VoidCallback onEdit;
 
@@ -921,76 +1037,76 @@ class _ViewProps extends StatelessWidget {
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _section(context, 'ビュー(${v.viewType == ViewType.join ? '結合' : '関数'})'),
-        CommitTextField(
-          key: ValueKey('vl$id'),
-          label: '論理名',
-          value: v.logicalName,
-          enabled: !dis,
-          focusNode: nameFocus,
-          onCommit: (x) => edit((c) => c.logicalName = x),
-        ),
-        _gap(),
-        CommitTextField(
-          key: ValueKey('vp$id'),
-          label: '物理名',
-          value: v.physicalName,
-          enabled: !dis,
-          validator: (x) => _physicalNameError(session, x, entityId: id),
-          onCommit: (x) => edit((c) => c.physicalName = x),
-        ),
-        _gap(),
-        CommitTextField(
-          key: ValueKey('vc$id'),
-          label: 'コメント',
-          value: v.comment,
-          enabled: !dis,
-          multiline: true,
-          onCommit: (x) => edit((c) => c.comment = x),
-        ),
-        _gap(),
-        Text(
-          '定義: ${v.viewType == ViewType.join ? 'ソース${v.join.sources.length}件 / 出力列${v.join.columns.length}件' : '戻り列${v.function.columns.length}件'}',
-        ),
-        if (v.viewType == ViewType.function)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.tonalIcon(
-              onPressed: dis ? null : onEdit,
-              icon: const Icon(Icons.edit, size: 16),
-              label: const Text('定義を編集'),
-            ),
-          )
-        else
-          Text(
-            '結合ビューの定義ダイアログは今後のバージョンで対応します(定義は.peroファイルから読み込めます)',
-            style: Theme.of(context).textTheme.bodySmall,
+      children: switch (tab) {
+        0 => [
+          _hint(context, 'ビュー(${v.viewType == ViewType.join ? '結合' : '関数'})'),
+          _gap(),
+          CommitTextField(
+            key: ValueKey('vl$id'),
+            label: '論理名',
+            value: v.logicalName,
+            enabled: !dis,
+            focusNode: nameFocus,
+            onCommit: (x) => edit((c) => c.logicalName = x),
           ),
-        CommitTextField(
-          key: ValueKey('vpre$id'),
-          label: '生成前実行クエリ',
-          value: v.preQuery,
-          enabled: !dis,
-          multiline: true,
-          onCommit: (x) => edit((c) => c.preQuery = x),
-        ),
-        _gap(),
-        CommitTextField(
-          key: ValueKey('vpost$id'),
-          label: '生成後実行クエリ',
-          value: v.postQuery,
-          enabled: !dis,
-          multiline: true,
-          onCommit: (x) => edit((c) => c.postQuery = x),
-        ),
-        SwitchListTile(
-          dense: true,
-          title: const Text('ロック'),
-          value: v.locked,
-          onChanged: (x) => session.run(SetLockedCommand([id], x)),
-        ),
-      ],
+          _gap(),
+          CommitTextField(
+            key: ValueKey('vp$id'),
+            label: '物理名',
+            value: v.physicalName,
+            enabled: !dis,
+            validator: (x) => _physicalNameError(session, x, entityId: id),
+            onCommit: (x) => edit((c) => c.physicalName = x),
+          ),
+          _gap(),
+          CommitTextField(
+            key: ValueKey('vc$id'),
+            label: 'コメント',
+            value: v.comment,
+            enabled: !dis,
+            multiline: true,
+            onCommit: (x) => edit((c) => c.comment = x),
+          ),
+          _gap(),
+          _switch('ロック', v.locked, (x) => session.run(SetLockedCommand([id], x))),
+        ],
+        1 => [
+          Text(
+            '定義: ${v.viewType == ViewType.join ? 'ソース${v.join.sources.length}件 / 出力列${v.join.columns.length}件' : '戻り列${v.function.columns.length}件'}',
+          ),
+          _gap(),
+          if (v.viewType == ViewType.function)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: FilledButton.tonalIcon(
+                onPressed: dis ? null : onEdit,
+                icon: const Icon(Icons.edit, size: 16),
+                label: const Text('定義を編集'),
+              ),
+            )
+          else
+            _hint(context, '結合ビューの定義ダイアログは今後のバージョンで対応します(定義は.peroファイルから読み込めます)'),
+        ],
+        _ => [
+          CommitTextField(
+            key: ValueKey('vpre$id'),
+            label: '生成前実行クエリ',
+            value: v.preQuery,
+            enabled: !dis,
+            multiline: true,
+            onCommit: (x) => edit((c) => c.preQuery = x),
+          ),
+          _gap(),
+          CommitTextField(
+            key: ValueKey('vpost$id'),
+            label: '生成後実行クエリ',
+            value: v.postQuery,
+            enabled: !dis,
+            multiline: true,
+            onCommit: (x) => edit((c) => c.postQuery = x),
+          ),
+        ],
+      },
     );
   }
 }
@@ -1002,9 +1118,11 @@ class _RelationshipProps extends StatelessWidget {
     super.key,
     required this.session,
     required this.id,
+    required this.tab,
   });
   final EditorSession session;
   final int id;
+  final int tab;
 
   static const _actions = {
     RefAction.none: '適用しない',
@@ -1055,169 +1173,140 @@ class _RelationshipProps extends StatelessWidget {
     });
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _section(context, 'リレーションシップ'),
-        Row(
-          children: [
-            Expanded(child: Text('親: ${p.displayLabel}\n子: ${c.displayLabel}')),
-            IconButton(
-              tooltip: '親と子を入れ替える',
-              icon: const Icon(Icons.swap_vert),
-              onPressed: dis
-                  ? null
-                  : () => session.run(SwapRelationshipDirectionCommand(id)),
-            ),
-          ],
-        ),
-        _section(context, '列対応'),
-        for (var i = 0; i < r.columnPairs.length; i++)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    parentCols
-                            .where(
-                              (x) =>
-                                  x.column.id ==
-                                  r.columnPairs[i].parentColumnId,
-                            )
-                            .firstOrNull
-                            ?.column
-                            .physicalName ??
-                        '?',
-                  ),
-                ),
-                const Icon(Icons.arrow_forward, size: 14),
-                const SizedBox(width: 4),
-                Expanded(
-                  flex: 2,
-                  child: DropdownButtonFormField<int>(
-                    key: ValueKey('pair$id$i${r.columnPairs[i].childColumnId}'),
-                    initialValue:
-                        childCols.any(
-                          (x) => x.column.id == r.columnPairs[i].childColumnId,
-                        )
-                        ? r.columnPairs[i].childColumnId
-                        : null,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border: OutlineInputBorder(),
+      children: switch (tab) {
+        0 => [
+          Row(
+            children: [
+              Expanded(
+                child: Text('親: ${p.displayLabel}\n子: ${c.displayLabel}'),
+              ),
+              IconButton(
+                tooltip: '親と子を入れ替える',
+                icon: const Icon(Icons.swap_vert),
+                onPressed: dis
+                    ? null
+                    : () => session.run(SwapRelationshipDirectionCommand(id)),
+              ),
+            ],
+          ),
+          _gap(),
+          _switch(
+            '依存関係(識別関係)',
+            r.dependency,
+            dis ? null : (v) => _update(context, r, {'dependency': v}),
+          ),
+          _gap(8),
+          _dropdown<Multiplicity>(
+            key: ValueKey('mul$id${r.childMultiplicity}'),
+            label: '子側多重度',
+            value: r.childMultiplicity,
+            items: const [
+              DropdownMenuItem(value: Multiplicity.one, child: Text('1')),
+              DropdownMenuItem(value: Multiplicity.many, child: Text('多')),
+            ],
+            onChanged: dis
+                ? null
+                : (v) => _update(context, r, {'childMultiplicity': v!.wire}),
+          ),
+          _gap(),
+          _switch(
+            'ロック',
+            r.locked,
+            (v) => session.run(SetLockedCommand([id], v)),
+          ),
+        ],
+        1 => [
+          for (var i = 0; i < r.columnPairs.length; i++) ...[
+            _dropdown<int>(
+              key: ValueKey('pair$id$i${r.columnPairs[i].childColumnId}'),
+              label:
+                  '親の列「${parentCols.where((x) => x.column.id == r.columnPairs[i].parentColumnId).firstOrNull?.column.physicalName ?? '?'}」に対応する子の列',
+              value:
+                  childCols.any(
+                    (x) => x.column.id == r.columnPairs[i].childColumnId,
+                  )
+                  ? r.columnPairs[i].childColumnId
+                  : null,
+              items: [
+                for (final x in childCols)
+                  DropdownMenuItem(
+                    value: x.column.id,
+                    child: Text(
+                      x.column.physicalName,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    items: [
-                      for (final x in childCols)
-                        DropdownMenuItem(
-                          value: x.column.id,
-                          child: Text(
-                            x.column.physicalName,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: dis
-                        ? null
-                        : (v) {
-                            if (v == null) return;
-                            final pairs = [
-                              for (var k = 0; k < r.columnPairs.length; k++)
-                                {
-                                  'parentColumnId':
-                                      r.columnPairs[k].parentColumnId,
-                                  'childColumnId': k == i
-                                      ? v
-                                      : r.columnPairs[k].childColumnId,
-                                },
-                            ];
-                            _update(context, r, {'columnPairs': pairs});
-                          },
                   ),
-                ),
-              ],
-            ),
-          ),
-        SwitchListTile(
-          dense: true,
-          title: const Text('依存関係(識別関係)'),
-          value: r.dependency,
-          onChanged: dis ? null : (v) => _update(context, r, {'dependency': v}),
-        ),
-        DropdownButtonFormField<Multiplicity>(
-          key: ValueKey('mul$id${r.childMultiplicity}'),
-          initialValue: r.childMultiplicity,
-          decoration: const InputDecoration(
-            labelText: '子側多重度',
-            isDense: true,
-            border: OutlineInputBorder(),
-          ),
-          items: const [
-            DropdownMenuItem(value: Multiplicity.one, child: Text('1')),
-            DropdownMenuItem(value: Multiplicity.many, child: Text('多')),
-          ],
-          onChanged: dis
-              ? null
-              : (v) => _update(context, r, {'childMultiplicity': v!.wire}),
-        ),
-        _gap(),
-        Row(
-          children: [
-            const Text('外部キー制約名: '),
-            DropdownButton<NameMode>(
-              value: r.nameMode,
-              items: const [
-                DropdownMenuItem(value: NameMode.auto, child: Text('自動')),
-                DropdownMenuItem(value: NameMode.manual, child: Text('手動')),
               ],
               onChanged: dis
                   ? null
-                  : (v) => _update(context, r, {
-                      'nameMode': v!.wire,
-                      if (v == NameMode.manual && r.name.isEmpty)
-                        'name': m.foreignKeyName(r),
-                    }),
+                  : (v) {
+                      if (v == null) return;
+                      final pairs = [
+                        for (var k = 0; k < r.columnPairs.length; k++)
+                          {
+                            'parentColumnId': r.columnPairs[k].parentColumnId,
+                            'childColumnId': k == i
+                                ? v
+                                : r.columnPairs[k].childColumnId,
+                          },
+                      ];
+                      _update(context, r, {'columnPairs': pairs});
+                    },
             ),
+            _gap(),
           ],
-        ),
-        if (r.nameMode == NameMode.auto) Text(m.foreignKeyName(r)),
-        if (r.nameMode == NameMode.manual)
-          CommitTextField(
-            key: ValueKey('fkn$id'),
-            label: '制約名',
-            value: r.name,
-            enabled: !dis,
-            validator: (v) => v.isEmpty ? '制約名は必須です' : null,
-            onCommit: (v) => _update(context, r, {'name': v}),
-          ),
-        _gap(),
-        for (final (label, key, value) in [
-          ('ON DELETE', 'onDelete', r.onDelete),
-          ('ON UPDATE', 'onUpdate', r.onUpdate),
-        ]) ...[
-          DropdownButtonFormField<RefAction>(
-            key: ValueKey('$key$id$value'),
-            initialValue: value,
-            decoration: InputDecoration(
-              labelText: label,
-              isDense: true,
-              border: const OutlineInputBorder(),
-            ),
-            items: [
-              for (final e in _actions.entries)
-                if (!(e.key == RefAction.setNull && childHasNotNull))
-                  DropdownMenuItem(value: e.key, child: Text(e.value)),
+        ],
+        _ => [
+          _dropdown<NameMode>(
+            key: ValueKey('fknm$id${r.nameMode}'),
+            label: '外部キー制約名の決め方',
+            value: r.nameMode,
+            items: const [
+              DropdownMenuItem(value: NameMode.auto, child: Text('自動')),
+              DropdownMenuItem(value: NameMode.manual, child: Text('手動')),
             ],
-            onChanged: dis ? null : (v) => _update(context, r, {key: v!.wire}),
+            onChanged: dis
+                ? null
+                : (v) => _update(context, r, {
+                    'nameMode': v!.wire,
+                    if (v == NameMode.manual && r.name.isEmpty)
+                      'name': m.foreignKeyName(r),
+                  }),
           ),
           _gap(),
+          if (r.nameMode == NameMode.auto)
+            Text('制約名: ${m.foreignKeyName(r)}')
+          else
+            CommitTextField(
+              key: ValueKey('fkn$id'),
+              label: '制約名',
+              value: r.name,
+              enabled: !dis,
+              validator: (v) => v.isEmpty ? '制約名は必須です' : null,
+              onCommit: (v) => _update(context, r, {'name': v}),
+            ),
+          _gap(),
+          for (final (label, key, value) in [
+            ('ON DELETE', 'onDelete', r.onDelete),
+            ('ON UPDATE', 'onUpdate', r.onUpdate),
+          ]) ...[
+            _dropdown<RefAction>(
+              key: ValueKey('$key$id$value'),
+              label: label,
+              value: value,
+              items: [
+                for (final e in _actions.entries)
+                  if (!(e.key == RefAction.setNull && childHasNotNull))
+                    DropdownMenuItem(value: e.key, child: Text(e.value)),
+              ],
+              onChanged: dis
+                  ? null
+                  : (v) => _update(context, r, {key: v!.wire}),
+            ),
+            _gap(),
+          ],
         ],
-        SwitchListTile(
-          dense: true,
-          title: const Text('ロック'),
-          value: r.locked,
-          onChanged: (v) => session.run(SetLockedCommand([id], v)),
-        ),
-      ],
+      },
     );
   }
 }

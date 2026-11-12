@@ -44,11 +44,60 @@ void main() {
   Finder field(String label) => find.widgetWithText(TextField, label).first;
   TableEntity cur() => session.model.tableById(t.id)!;
 
-  testWidgets('何も選択していないときはモデルとダイアグラムのプロパティを表示する', (tester) async {
+  testWidgets('何も選択していないときは、モデルとダイアグラムのタブでプロパティを表示する', (tester) async {
     await pumpPanel(tester);
-    expect(find.text('モデル'), findsOneWidget);
-    expect(find.text('ダイアグラム'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, 'モデル'), findsOneWidget);
+    expect(find.widgetWithText(ChoiceChip, 'ダイアグラム'), findsOneWidget);
+    expect(find.widgetWithText(TextField, '出力ファイル名'), findsOneWidget);
+    expect(find.textContaining('用紙ページ'), findsNothing); // 別タブ
+    await tester.tap(find.widgetWithText(ChoiceChip, 'ダイアグラム'));
+    await tester.pump();
     expect(find.textContaining('用紙ページ: 1行 × 1列'), findsOneWidget);
+    expect(find.widgetWithText(TextField, '出力ファイル名'), findsNothing);
+  });
+
+  testWidgets('テーブルは機能別のタブに分かれ、同じ種類の間は選択中のタブを保持する', (tester) async {
+    session.setSelection([t.id]);
+    await pumpPanel(tester);
+    for (final label in ['基本', '列', '制約', 'トリガー', 'クエリ']) {
+      expect(find.widgetWithText(ChoiceChip, label), findsOneWidget);
+    }
+    expect(find.widgetWithText(TextField, '論理名'), findsOneWidget); // 基本
+    expect(find.text('列を追加'), findsNothing);
+    await tester.tap(find.widgetWithText(ChoiceChip, '列'));
+    await tester.pump();
+    expect(find.text('列を追加'), findsOneWidget);
+    expect(find.widgetWithText(TextField, '論理名'), findsNothing);
+    // 別のテーブルを選んでも「列」タブのまま
+    final other = session.model.tables.firstWhere((x) => x.id != t.id);
+    session.setSelection([other.id]);
+    await tester.pump();
+    expect(find.text('列を追加'), findsOneWidget);
+  });
+
+  testWidgets('列の項目は1項目1行で縦に並ぶ(開いたとき、各入力欄が別の行にある)', (tester) async {
+    session.setSelection([t.id]);
+    await pumpPanel(tester);
+    await tester.tap(find.widgetWithText(ChoiceChip, '列'));
+    await tester.pump();
+    await tester.tap(find.text('name'));
+    await tester.pumpAndSettle();
+    final ys = <double>[];
+    for (final label in ['論理名', '物理名', '型', '長さ', 'デフォルト', 'コメント']) {
+      final f = find.ancestor(of: find.text(label), matching: find.byType(InputDecorator));
+      expect(f, findsWidgets, reason: label);
+      ys.add(tester.getTopLeft(f.first).dy);
+    }
+    // 上から順に、互いに重ならず並ぶ
+    for (var i = 1; i < ys.length; i++) {
+      expect(ys[i], greaterThan(ys[i - 1]), reason: 'index $i');
+    }
+    // 同じ行に2つ以上の入力欄が並ばない
+    final lefts = {
+      for (final label in ['論理名', '物理名', '型', '長さ', 'デフォルト', 'コメント'])
+        tester.getTopLeft(find.ancestor(of: find.text(label), matching: find.byType(InputDecorator)).first).dx
+    };
+    expect(lefts.length, 1);
   });
 
   testWidgets('複数選択のときは「N個選択」とロックの一括切替だけを表示する', (tester) async {
@@ -115,7 +164,9 @@ void main() {
   testWidgets('列の追加で既定値(列N・column_N・varchar(255))が入る', (tester) async {
     session.setSelection([t.id]);
     await pumpPanel(tester);
-    await tester.tap(find.text('追加').first);
+    await tester.tap(find.widgetWithText(ChoiceChip, '列'));
+    await tester.pump();
+    await tester.tap(find.text('列を追加'));
     await tester.pump();
     final c = cur().columns.last;
     expect((c.logicalName, c.physicalName, c.typeId, c.length), ('列1', 'column_1', 'varchar', 255));
@@ -135,13 +186,63 @@ void main() {
   testWidgets('PKにするとNotNullが固定される', (tester) async {
     session.setSelection([t.id]);
     await pumpPanel(tester);
+    await tester.tap(find.widgetWithText(ChoiceChip, '列'));
+    await tester.pump();
     final nameCol = cur().columns[1];
     expect(nameCol.notNull, isFalse);
-    // 2列目のPKチェック(各列カードのCheckbox: PK, NotNull の順)
-    final boxes = find.byType(Checkbox);
-    await tester.tap(boxes.at(2)); // 2列目のPK
+    await tester.tap(find.text('name')); // 2列目を開く
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(CheckboxListTile, 'PK(主キー)'));
     await tester.pump();
     final c = cur().columns[1];
     expect((c.pk, c.notNull), (true, true));
+  });
+
+  testWidgets('右ペインの既定幅(約300px)でも、全タブの全項目が横にあふれない', (tester) async {
+    tester.view.physicalSize = const Size(300, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    final m = fullModel();
+    final s = newSession(model: m);
+    final orders = m.tables.firstWhere((x) => x.physicalName == 'orders');
+    final rel = m.relationships.first;
+    final view = m.views.firstWhere((v) => v.viewType == ViewType.function);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: ListenableBuilder(
+          listenable: s,
+          builder: (_, _) => PropertyPanel(
+            session: s,
+            nameFocus: FocusNode(),
+            onManageMethods: () async {},
+            onEditFunctionView: (_) async {},
+          ),
+        ),
+      ),
+    ));
+    Future<void> visit(int id, List<String> tabs) async {
+      s.setSelection([id]);
+      await tester.pumpAndSettle();
+      for (final tab in tabs) {
+        await tester.tap(find.widgetWithText(ChoiceChip, tab));
+        await tester.pumpAndSettle();
+        // 開閉できるもの(列、トリガー)は全て開く
+        for (final tile in find.byType(ExpansionTile).evaluate().toList()) {
+          final w = tile.widget as ExpansionTile;
+          if (w.title is Text) {
+            await tester.tap(find.byWidget(w.title));
+            await tester.pumpAndSettle();
+          }
+        }
+        expect(tester.takeException(), isNull, reason: tab);
+      }
+    }
+
+    await visit(orders.id, ['基本', '列', '制約', 'トリガー', 'クエリ']);
+    await visit(rel.id, ['基本', '列対応', '参照規則']);
+    await visit(view.id, ['基本', '定義', 'クエリ']);
+    s.setSelection([]);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 }
