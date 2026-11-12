@@ -78,12 +78,19 @@ void main() {
   });
 
   test('ポストファイルの例外・戻り値・console.log・ES2020構文', () async {
-    final runner = QjsPostRunner();
+    final runner = JsPostRunner();
     const t = Duration(seconds: 10);
     expect(await runner.run(script: r'function main(j){ return `a${JSON.parse(j).x ?? 0}`; }', jsonText: '{"x":5}', timeout: t), 'a5');
     final logs = <String>[];
     await runner.run(script: 'function main(j){ console.log("hi", 1); return ""; }', jsonText: '{}', timeout: t, onLog: logs.add);
     expect(logs, ['hi 1']);
+    // タイマー、ネットワークは使えない(9.6-4)
+    expect(
+        await runner.run(
+            script: "function main(j){ return [typeof setTimeout, typeof setInterval, typeof fetch, typeof XMLHttpRequest].join(','); }",
+            jsonText: '{}',
+            timeout: t),
+        'undefined,undefined,undefined,undefined');
     await expectLater(runner.run(script: 'function main(j){ throw new Error("boom"); }', jsonText: '{}', timeout: t),
         throwsA(isA<PostException>().having((e) => e.message, 'message', 'boom')));
     await expectLater(runner.run(script: 'function main(j){ return 1; }', jsonText: '{}', timeout: t),

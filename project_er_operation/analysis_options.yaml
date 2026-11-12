@@ -13,7 +13,6 @@ analyzer:
   exclude:
     - build/**
     - web/**
-    - third_party/**
     - windows/**
 
 linter:

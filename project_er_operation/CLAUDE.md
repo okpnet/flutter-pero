@@ -60,7 +60,7 @@ ER図作成アプリ「PERO」の仕様書。本書は実装用の指示書と�
 3. 次のパッケージを候補とする。採用時に最新版とWindows対応を確認し、使えない場合は代替を選んで理由をレポートに記載する。
    4. 状態管理: Riverpod(riverpod_generator)
    5. 不変モデルとJSON: freezed、json_serializable
-   6. JavaScript実行: flutter_qjs
+   6. JavaScript実行: flutter_js
    7. ファイル選択: file_picker
    8. ウィンドウ制御: window_manager
    9. パス取得: path_provider
@@ -565,7 +565,7 @@ ER図作成アプリ「PERO」の仕様書。本書は実装用の指示書と�
    14. 終了クエリ
 15. 依存順: アプリが `tables` を親から子の順(トポロジカル順)に並べる。循環がある場合は、循環を構成する外部キーに `deferred: true` を付ける。ポストファイルは、`deferred` の外部キーを、すべてのテーブルを作成した後にALTER TABLEで出力する。`deferred` でない外部キーは、親が先に出力済みなので、CREATE TABLEの中でも後でもよい。
 16. ポストファイルの契約
-   17. JavaScript(ES2020)、UTF-8、拡張子 `.post`。flutter_qjs(QuickJS)で実行する。
+   17. JavaScript(ES2020)、UTF-8、拡張子 `.post`。flutter_js(QuickJS)で実行する。
    18. `function main(jsonText)`: 引数は生成用JSONの文字列、戻り値は生成ファイル全文(文字列。改行は `\n`)。
    19. エラーは `throw` する。生成を中止し、メッセージを表示する。
    20. ファイル、ネットワーク、タイマーは使えない。`console.log` はログ(info)に記録する。

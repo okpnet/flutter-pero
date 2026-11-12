@@ -13,6 +13,5 @@ flutter test
 flutter build windows --debug
 ```
 
-- `postgresql.post` の生成テスト(`test/generation`)は QuickJS を使うため、先に一度 `flutter build windows --debug` を実行してください。テストは `build/windows/x64/plugins/flutter_qjs/Debug/flutter_qjs_plugin.dll` を `test/build/Debug/ffiquickjs.dll` にコピーして使います。
-- `third_party/flutter_qjs` は `flutter_qjs 0.3.7` に、現行のDartでコンパイルするための2行のパッチを当てたものです(理由はレポートを参照)。
+- `postgresql.post` の生成テスト(`test/generation`)は QuickJS(flutter_js)を使うため、先に一度 `flutter build windows --debug` を実行してください。テストは `build/windows/x64/runner/Debug/quickjs_c_bridge.dll` をプロジェクト直下へコピーして使います(`.gitignore` 対象)。
 - `flutter test` / `flutter analyze` / 依存の追加の直後の `flutter build windows`(IDEのデバッグ実行を含む)は、1回目だけ「`windows/flutter/ephemeral/cpp_client_wrapper` のソースが開けない」というエラーで失敗することがあります。もう一度実行すると成功します。

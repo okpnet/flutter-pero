@@ -554,7 +554,7 @@ class EditorActions implements CanvasHost {
     // 生成前検証 → 生成
     final GenerationOutcome out;
     try {
-      out = await GenerationService(QjsPostRunner()).generate(
+      out = await GenerationService(JsPostRunner()).generate(
         model,
         script,
         timeout: Duration(seconds: session.settings.postTimeoutSeconds),

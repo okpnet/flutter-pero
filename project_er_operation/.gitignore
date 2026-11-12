@@ -48,7 +48,7 @@ app.*.map.json
 .widget_preview/
 
 # テスト用にコピーするQuickJSのDLL(test/support/post_support.dart)
-/test/build/
+/quickjs_c_bridge.dll
 
 # pubspec.lock はコミットして依存のバージョンを固定する(仕様 2-2)
 !pubspec.lock
