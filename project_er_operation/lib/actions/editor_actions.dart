@@ -1,12 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../canvas/canvas.dart';
 import '../command/command.dart';
+import 'file_dialogs.dart';
 import '../common/common.dart';
 import '../dialog/dialog.dart';
 import '../generation/generation.dart';
@@ -25,6 +26,7 @@ class EditorActions implements CanvasHost {
     required this.canvasKey,
     required this.nameFocus,
     required this.settingsStore,
+    this.dialogs = const FileDialogs(),
     required this.onSettingsApplied,
     required this.requestExit,
   });
@@ -34,6 +36,9 @@ class EditorActions implements CanvasHost {
   final GlobalKey<DiagramCanvasState> canvasKey;
   final FocusNode nameFocus;
   final SettingsStore settingsStore;
+
+  /// ファイル選択ダイアログ。
+  final FileDialogs dialogs;
   final void Function(AppSettings) onSettingsApplied;
   final Future<void> Function() requestExit;
 
@@ -73,13 +78,7 @@ class EditorActions implements CanvasHost {
   Future<void> openFile() async {
     if (!await confirmDiscard()) return;
     final dir = session.settings.lastFolder.isNotEmpty ? session.settings.lastFolder : await _documentsDir();
-    final r = await FilePicker.platform.pickFiles(
-      dialogTitle: Strings.fileOpen,
-      type: FileType.custom,
-      allowedExtensions: ['pero'],
-      initialDirectory: dir,
-    );
-    final path = r?.files.single.path;
+    final path = await dialogs.pickOpen(title: Strings.fileOpen, extensions: ['pero'], initialDirectory: dir);
     if (path == null) return;
     await openPath(path, skipConfirm: true);
   }
@@ -115,15 +114,21 @@ class EditorActions implements CanvasHost {
         ? cur.substring(0, cur.lastIndexOf(Platform.pathSeparator))
         : (session.settings.lastFolder.isNotEmpty ? session.settings.lastFolder : await _documentsDir());
     final name = cur != null ? cur.substring(cur.lastIndexOf(Platform.pathSeparator) + 1) : '${Strings.untitled}.pero';
-    final path = await FilePicker.platform.saveFile(
-      dialogTitle: Strings.fileSaveAs,
-      fileName: name,
-      initialDirectory: dir,
-      type: FileType.custom,
-      allowedExtensions: ['pero'],
-    );
-    if (path == null) return false;
-    return _saveTo(path.toLowerCase().endsWith('.pero') ? path : '$path.pero');
+    final SaveResult? r;
+    try {
+      r = await session.saveVia((bytes) => dialogs.saveBytes(
+            title: Strings.fileSaveAs,
+            fileName: name,
+            bytes: bytes,
+            extension: 'pero',
+            initialDirectory: dir,
+          ));
+    } on FileSystemException catch (e) {
+      if (_ctx.mounted) await showMessageDialog(_ctx, title: Strings.error, message: '書込みに失敗しました: ${e.message}');
+      return false;
+    }
+    if (r == null) return false;
+    return _afterSave(r);
   }
 
   /// 上書き保存。未保存の新規は「ファイルに保存」。
@@ -133,8 +138,10 @@ class EditorActions implements CanvasHost {
     return _saveTo(p);
   }
 
-  Future<bool> _saveTo(String path) async {
-    final r = await session.save(path);
+  Future<bool> _saveTo(String path) async => _afterSave(await session.save(path));
+
+  /// 保存結果の表示(エラー、修復の通知)。成功なら true。
+  Future<bool> _afterSave(SaveResult r) async {
     if (!r.isOk) {
       if (_ctx.mounted) await showMessageDialog(_ctx, title: Strings.error, message: r.error!);
       return false;
@@ -538,13 +545,11 @@ class EditorActions implements CanvasHost {
       final folder = session.settings.postFolder.isNotEmpty
           ? session.settings.postFolder
           : '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}post';
-      final r = await FilePicker.platform.pickFiles(
-        dialogTitle: 'ポストファイルを選択',
-        type: FileType.custom,
-        allowedExtensions: ['post'],
+      final picked = await dialogs.pickOpen(
+        title: 'ポストファイルを選択',
+        extensions: ['post'],
         initialDirectory: Directory(folder).existsSync() ? folder : null,
       );
-      final picked = r?.files.single.path;
       if (picked == null) return;
       postPath = picked;
       session.run(UpdateModelPropertiesCommand({'postPath': postPath}));
@@ -622,23 +627,26 @@ class EditorActions implements CanvasHost {
       await showValidationErrors(ctx, v.errors, v.warnings);
       return;
     }
-    final cur = session.filePath;
-    final dir = cur != null ? cur.substring(0, cur.lastIndexOf(Platform.pathSeparator)) : await _documentsDir();
+    final dir = await _outputDir();
     final base = model.properties.outputFileName.isNotEmpty ? model.properties.outputFileName : Strings.untitled;
-    final path = await FilePicker.platform.saveFile(
-      dialogTitle: Strings.runJson,
-      fileName: '$base.json',
-      initialDirectory: dir,
-      type: FileType.custom,
-      allowedExtensions: ['json'],
-    );
-    if (path == null) return;
     try {
-      await File(path).writeAsString(GenerationJsonBuilder(model).buildText(indent: true), encoding: utf8);
-      session.notify('JSONを出力しました: $path');
+      final path = await dialogs.saveBytes(
+        title: Strings.runJson,
+        fileName: '$base.json',
+        bytes: Uint8List.fromList(utf8.encode(GenerationJsonBuilder(model).buildText(indent: true))),
+        extension: 'json',
+        initialDirectory: dir,
+      );
+      if (path != null) session.notify('JSONを出力しました: $path');
     } on FileSystemException catch (e) {
       if (ctx.mounted) await showMessageDialog(ctx, title: Strings.error, message: '書込みに失敗しました: ${e.message}');
     }
+  }
+
+  /// 保存ダイアログの既定のフォルダ(開いているファイルのフォルダ、無ければドキュメント)。
+  Future<String> _outputDir() async {
+    final cur = session.filePath;
+    return cur != null ? cur.substring(0, cur.lastIndexOf(Platform.pathSeparator)) : await _documentsDir();
   }
 
   Future<void> exportImage() async {
@@ -655,22 +663,25 @@ class EditorActions implements CanvasHost {
       perPage: opt.perPage,
       fontFamily: session.settings.fontFamily.isEmpty ? null : session.settings.fontFamily,
     );
-    final dir = session.filePath != null
-        ? session.filePath!.substring(0, session.filePath!.lastIndexOf(Platform.pathSeparator))
-        : await _documentsDir();
+    final dir = await _outputDir();
+    final name = session.diagram.name;
     try {
-      if (result.pages.length == 1) {
-        final path = await FilePicker.platform.saveFile(
-          dialogTitle: Strings.runImage,
-          fileName: result.pages.single.name,
-          initialDirectory: dir,
-          type: FileType.custom,
-          allowedExtensions: ['png'],
-        );
+      if (opt.pdf) {
+        // PDF: 1ページ=PDFの1ページ(用紙ページごと)、または全体を1ページ(9.8-2)
+        final bytes = await buildPdf(result.pages, title: name);
+        final path = await dialogs.saveBytes(
+            title: Strings.runImage, fileName: '$name.pdf', bytes: bytes, extension: 'pdf', initialDirectory: dir);
         if (path == null) return;
-        await File(path).writeAsBytes(result.pages.single.png);
+      } else if (result.pages.length == 1) {
+        final path = await dialogs.saveBytes(
+            title: Strings.runImage,
+            fileName: result.pages.single.name,
+            bytes: result.pages.single.png,
+            extension: 'png',
+            initialDirectory: dir);
+        if (path == null) return;
       } else {
-        final folder = await FilePicker.platform.getDirectoryPath(dialogTitle: '出力先のフォルダ', initialDirectory: dir);
+        final folder = await dialogs.pickFolder(title: '出力先のフォルダ', initialDirectory: dir);
         if (folder == null) return;
         for (final p in result.pages) {
           await File('$folder${Platform.pathSeparator}${p.name}').writeAsBytes(p.png);
@@ -678,7 +689,7 @@ class EditorActions implements CanvasHost {
       }
       session.notify(result.dpiReduced
           ? '1辺が16000pxを超えるため、解像度を${result.effectiveDpi}dpiに下げて出力しました'
-          : '画像を出力しました');
+          : '${opt.pdf ? 'PDF' : '画像'}を出力しました');
     } on FileSystemException catch (e) {
       if (ctx.mounted) await showMessageDialog(ctx, title: Strings.error, message: '書込みに失敗しました: ${e.message}');
     }

@@ -214,6 +214,24 @@ class EditorSession extends ChangeNotifier {
   /// 保存。成功したら未保存状態を解除し、キャッシュの基点を更新する(4.1-3)。
   Future<SaveResult> save(String path) async {
     final r = await PeroFile.save(model, path);
+    return _completeSave(path, r);
+  }
+
+  /// 保存先の選択(ダイアログ)が書込みも行う場合の保存(「ファイルに保存」)。
+  /// [writer] は、整合性確認を済ませたバイト列を受け取り、保存したパスを返す(キャンセルはnull)。
+  /// キャンセルのときは null を返す。
+  Future<SaveResult?> saveVia(Future<String?> Function(Uint8List bytes) writer) async {
+    final prep = PeroFile.prepare(model);
+    if (!prep.isOk) {
+      logger.error('保存を中止: ${prep.error}');
+      return SaveResult.fail(prep.error);
+    }
+    final path = await writer(prep.bytes!);
+    if (path == null) return null;
+    return _completeSave(path, SaveResult.ok(prep.repairs));
+  }
+
+  SaveResult _completeSave(String path, SaveResult r) {
     if (!r.isOk) {
       logger.error('保存に失敗: $path / ${r.error}');
       return r;

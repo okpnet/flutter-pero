@@ -7,9 +7,13 @@ import 'diagram_painter.dart';
 
 /// 1枚の画像の出力結果。
 class RenderedPage {
-  RenderedPage(this.name, this.png);
+  RenderedPage(this.name, this.png, this.logicalWidth, this.logicalHeight);
   final String name;
   final Uint8List png;
+
+  /// 論理px(96dpi)での用紙/範囲の大きさ(PDFのページサイズに使う)。
+  final double logicalWidth;
+  final double logicalHeight;
 }
 
 class ImageExportResult {
@@ -76,12 +80,13 @@ Future<ImageExportResult> renderDiagramPng({
     for (var r = 0; r < diagram.pageRows; r++) {
       for (var c = 0; c < diagram.pageCols; c++) {
         final png = await one(ui.Rect.fromLTWH(c * pw, r * ph, pw, ph));
-        pages.add(RenderedPage('${diagram.name}_r${r + 1}c${c + 1}.png', png));
+        pages.add(RenderedPage('${diagram.name}_r${r + 1}c${c + 1}.png', png, pw, ph));
       }
     }
   } else {
     pages.add(RenderedPage('${diagram.name}.png',
-        await one(ui.Rect.fromLTWH(0, 0, diagram.gridWidth, diagram.gridHeight))));
+        await one(ui.Rect.fromLTWH(0, 0, diagram.gridWidth, diagram.gridHeight)),
+        diagram.gridWidth, diagram.gridHeight));
   }
   return ImageExportResult(pages, (scale * 96).round(), reduced);
 }
