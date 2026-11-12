@@ -31,7 +31,7 @@ class PreparedSave {
 /// `.pero` ファイルの読み書き(4.1、9.4)。
 class PeroFile {
   /// 保存の準備: 整合性確認(修復を含む)を行い、書き込むバイト列(UTF-8、BOMなし)を作る(9.4-1)。
-  /// ファイル選択ダイアログがバイト列を書き込む場合(file_picker)にも使う。
+  /// ファイル選択ダイアログが書込みまで行う場合にも使える(現在は file_selector のため、書込みはアプリが行う)。
   static PreparedSave prepare(ErModel model) {
     final (ok, repairs) = IntegrityRepairer.repairAll(model);
     if (!ok) return PreparedSave.fail('整合性を回復できないため保存を中止しました');

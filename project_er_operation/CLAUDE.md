@@ -61,7 +61,7 @@ ER図作成アプリ「PERO」の仕様書。本書は実装用の指示書と�
    4. 状態管理: Riverpod(riverpod_generator)
    5. 不変モデルとJSON: freezed、json_serializable
    6. JavaScript実行: flutter_js
-   7. ファイル選択: file_picker
+   7. ファイル選択: file_selector
    8. ウィンドウ制御: window_manager
    9. パス取得: path_provider
    10. PDF出力: pdf
