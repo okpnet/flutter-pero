@@ -1,6 +1,7 @@
 // window_manager 0.6 の旧API(legacy)を使う。新APIへの移行は今後の課題。
 // ignore_for_file: deprecated_member_use
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -16,6 +17,7 @@ import '../model/model.dart' hide Orientation;
 import '../panel/panel.dart';
 import '../session/session.dart';
 import '../settings/settings.dart';
+import 'single_instance.dart';
 
 /// メイン画面(3.1): メニューバー、サイドメニュー、キャンバス(タブバー)、右ペイン、ステータスバー。
 class MainScreen extends StatefulWidget {
@@ -25,11 +27,15 @@ class MainScreen extends StatefulWidget {
     required this.settingsStore,
     required this.onSettingsApplied,
     this.initialFile,
+    this.singleInstance,
   });
   final EditorSession session;
   final SettingsStore settingsStore;
   final void Function(AppSettings) onSettingsApplied;
   final String? initialFile;
+
+  /// 単一インスタンス(2つ目の起動から渡された引数を受け取る)。nullなら多重起動を許す。
+  final SingleInstance? singleInstance;
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -40,6 +46,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
   final nameFocus = FocusNode();
   late final EditorActions actions;
   String _lastTitle = '';
+  StreamSubscription<List<String>>? _externalSub;
 
   EditorSession get s => widget.session;
 
@@ -56,15 +63,31 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
       requestExit: _shutdown,
     );
     windowManager.addListener(this);
+    _externalSub = widget.singleInstance?.messages.listen(_onExternalArgs);
     windowManager.setPreventClose(true);
     WidgetsBinding.instance.addPostFrameCallback((_) => _startup());
   }
 
   @override
   void dispose() {
+    _externalSub?.cancel();
     windowManager.removeListener(this);
     nameFocus.dispose();
     super.dispose();
+  }
+
+  /// 2つ目の起動から渡された引数(2-14)。ウィンドウを前面に出し、`.pero` が指定されていれば開く。
+  Future<void> _onExternalArgs(List<String> args) async {
+    try {
+      if (await windowManager.isMinimized()) await windowManager.restore();
+      await windowManager.show();
+      await windowManager.focus();
+    } on Object catch (e) {
+      s.logger.warn('ウィンドウを前面に出せません: $e');
+    }
+    final path = peroPathFromArgs(args);
+    s.logger.info('別の起動から引数を受信: ${args.join(' ')}');
+    if (path != null && mounted) await actions.openPath(path);
   }
 
   /// 起動処理(9.2-4)。復元の可否が確定した後にキャッシュを削除し、セッションロックを作る。
@@ -117,6 +140,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     widget.settingsStore.save(s.settings);
     s.cache.clear();
     s.cache.deleteSessionLock();
+    await widget.singleInstance?.close();
     s.logger.info('正常終了');
     await windowManager.setPreventClose(false);
     await windowManager.destroy();

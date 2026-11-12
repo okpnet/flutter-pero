@@ -14,6 +14,7 @@ import '../persistence/persistence.dart';
 import '../session/session.dart';
 import '../settings/settings.dart';
 import 'main_screen.dart';
+import 'single_instance.dart';
 
 /// アプリのバージョン。
 const String appVersion = '0.1.0';
@@ -21,6 +22,13 @@ const String appVersion = '0.1.0';
 /// 起動処理: 設定の読込、ウィンドウの初期化、セッションの生成。
 Future<void> startApp(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 単一インスタンス(2-14): 既に起動していれば、引数(ファイルパス)を渡して終了する。
+  final appDir = '${Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path}${Platform.pathSeparator}PERO';
+  SingleInstance? single;
+  if (Platform.environment['PERO_ALLOW_MULTIPLE'] != '1') {
+    single = await SingleInstance.acquire(dir: appDir, args: args);
+    if (single == null) exit(0);
+  }
   await windowManager.ensureInitialized();
 
   final store = SettingsStore();
@@ -39,8 +47,7 @@ Future<void> startApp(List<String> args) async {
   };
   logger.info('起動 v$appVersion');
 
-  final localAppData = Platform.environment['LOCALAPPDATA'] ?? Directory.systemTemp.path;
-  final cache = CacheStore('$localAppData${Platform.pathSeparator}PERO');
+  final cache = CacheStore(appDir);
   final session = EditorSession(settings: settings, logger: container.read(loggerProvider('session')), cache: cache);
   if (settingsNotice != null) {
     logger.warn(settingsNotice);
@@ -71,16 +78,17 @@ Future<void> startApp(List<String> args) async {
         editorSessionProvider.overrideWithValue(session),
         settingsStoreProvider.overrideWithValue(store),
       ],
-      child: PeroApp(session: session, store: store, initialFile: peroPathFromArgs(args)),
+      child: PeroApp(session: session, store: store, initialFile: peroPathFromArgs(args), singleInstance: single),
     ),
   ));
 }
 
 class PeroApp extends StatefulWidget {
-  const PeroApp({super.key, required this.session, required this.store, this.initialFile});
+  const PeroApp({super.key, required this.session, required this.store, this.initialFile, this.singleInstance});
   final EditorSession session;
   final SettingsStore store;
   final String? initialFile;
+  final SingleInstance? singleInstance;
 
   @override
   State<PeroApp> createState() => _PeroAppState();
@@ -128,6 +136,7 @@ class _PeroAppState extends State<PeroApp> {
         settingsStore: widget.store,
         onSettingsApplied: _applied,
         initialFile: widget.initialFile,
+        singleInstance: widget.singleInstance,
       ),
     );
   }
