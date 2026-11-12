@@ -388,7 +388,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
             session: s,
             nameFocus: nameFocus,
             onManageMethods: actions.manageMethods,
-            onEditFunctionView: actions.editFunctionView,
+            onEditView: actions.editView,
           )),
         MouseRegion(
           cursor: SystemMouseCursors.resizeRow,

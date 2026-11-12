@@ -150,3 +150,14 @@ ErModel fullModel() {
       pageCols: 3));
   return m;
 }
+
+/// ビュー定義を別IDで複製する(結合ビューの検証用)。
+class PeroDecoderSafe {
+  static ViewEntity copyOf(ViewEntity v, int id) => ViewEntity(
+        id: id,
+        physicalName: v.physicalName,
+        viewType: v.viewType,
+        join: v.join.copy(),
+        function: v.function.copy(),
+      );
+}

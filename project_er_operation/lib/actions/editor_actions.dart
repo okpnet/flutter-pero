@@ -188,7 +188,7 @@ class EditorActions implements CanvasHost {
       addFunctionView(modelPos);
       return;
     }
-    showMessageDialog(_ctx, title: 'ビューの追加', message: '結合ビューの定義ダイアログは今後のバージョンで対応します。');
+    addJoinView(modelPos);
   }
 
   void addViewAtCenter(ViewType type) =>
@@ -228,9 +228,29 @@ class EditorActions implements CanvasHost {
     if (session.run(cmd)) session.setSelection([cmd.createdId!]);
   }
 
-  Future<void> editFunctionView(int id) async {
+  Future<void> addJoinView(Offset modelPos) async {
+    if (session.model.tables.isEmpty) {
+      await showMessageDialog(_ctx, title: 'ビューの追加', message: 'ソースにするテーブルがありません。先にテーブルを追加してください。');
+      return;
+    }
+    final v = await showJoinViewDialog(_ctx, session.model, nameFormat: session.settings.nameFormat);
+    if (v == null) return;
+    final cmd = AddViewCommand(
+        diagramId: session.diagram.id,
+        x: _snap(modelPos.dx),
+        y: _snap(modelPos.dy),
+        entityMap: PeroEncoder.entityToMap(v));
+    if (session.run(cmd)) session.setSelection([cmd.createdId!]);
+  }
+
+  Future<void> editView(int id) async {
     final e = session.model.entityById(id);
-    if (e is! ViewEntity || e.viewType != ViewType.function) return;
+    if (e is! ViewEntity) return;
+    if (e.viewType == ViewType.join) {
+      final v = await showJoinViewDialog(_ctx, session.model, nameFormat: session.settings.nameFormat, initial: e);
+      if (v != null) session.run(ReplaceEntityCommand.of(v));
+      return;
+    }
     final v = await showFunctionViewDialog(_ctx, session.model,
         nameFormat: session.settings.nameFormat, initial: e, onManageMethods: manageMethods);
     if (v != null) session.run(ReplaceEntityCommand.of(v));

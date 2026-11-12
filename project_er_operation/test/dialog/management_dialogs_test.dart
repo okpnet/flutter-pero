@@ -165,7 +165,7 @@ void main() {
             session: session,
             nameFocus: FocusNode(),
             onManageMethods: () async {},
-            onEditFunctionView: (_) async {},
+            onEditView: (_) async {},
           ),
         ),
       ),
@@ -198,5 +198,68 @@ void main() {
     session.undo();
     await tester.pumpAndSettle();
     expect(session.model.tableById(t.id)!.triggers.length, 1);
+  });
+
+  testWidgets('結合ビュー定義: ソースを追加すると結合条件が提案され、全列を出力列にしてOKで定義が返る', (tester) async {
+    final m = fullModel();
+    final customers = m.tables.firstWhere((t) => t.physicalName == 'customers');
+    final orders = m.tables.firstWhere((t) => t.physicalName == 'orders');
+    ViewEntity? out;
+    await openDialog<ViewEntity>(tester, (c) => showJoinViewDialog(c, m, nameFormat: _fmt), (r) => out = r);
+    // 何も選ばずOK → 不備を表示して閉じない
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('ソースを1つ以上'), findsOneWidget);
+    expect(out, isNull);
+
+    Future<void> addSource(String label) async {
+      await tester.tap(find.text('ソースを追加'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining(label).last);
+      await tester.pumpAndSettle();
+    }
+
+    await addSource('orders');
+    await addSource('customers');
+    expect(find.text('条件を追加'), findsOneWidget); // 2つ目のソースにだけ結合条件の欄がある
+    await tester.tap(find.text('orders の全列を追加'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('customers の全列を追加'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextFormField, '物理名'), 'v_join');
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(out, isNotNull);
+    final j = out!.join;
+    expect(out!.viewType, ViewType.join);
+    expect(j.sources.map((s) => s.alias), ['orders', 'customers']);
+    // リレーションシップ(customers.id = orders.customer_id)から提案された結合条件
+    expect(j.sources[1].on.single.leftAlias, 'orders');
+    expect(j.sources[1].on.single.leftColumnId, orders.columns[1].id);
+    expect(j.sources[1].on.single.rightColumnId, customers.columns[0].id);
+    expect(j.sources[1].joinType, JoinType.inner);
+    // 出力列: ソースの全列(実列+共通列)。名前の重複は別名で避ける
+    expect(j.columns.length, m.expand(orders).columns.length + m.expand(customers).columns.length);
+    final names = j.columns.map((c) => c.name.toLowerCase()).toList();
+    expect(names.toSet().length, names.length);
+    expect(names, contains('id'));
+    expect(names, contains('customers_id'));
+  });
+
+  testWidgets('結合ビュー定義: 既存の結合ビューを編集して返す(結合種別の変更)。元のビューは変更されない', (tester) async {
+    final m = fullModel();
+    final v = m.views.firstWhere((x) => x.viewType == ViewType.join);
+    ViewEntity? out;
+    await openDialog<ViewEntity>(tester, (c) => showJoinViewDialog(c, m, nameFormat: _fmt, initial: v), (r) => out = r);
+    expect(find.text('結合ビューの定義を編集'), findsOneWidget);
+    await tester.tap(find.byType(DropdownButtonFormField<JoinType>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('INNER').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(out!.id, v.id);
+    expect(out!.join.sources[1].joinType, JoinType.inner); // LEFT から変更
+    expect(v.join.sources[1].joinType, JoinType.left); // 作業コピーのため元は変わらない
   });
 }

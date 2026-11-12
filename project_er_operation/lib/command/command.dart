@@ -10,3 +10,4 @@ export 'command_factory.dart';
 export 'entity_commands.dart';
 export 'model_commands.dart';
 export 'relationship_commands.dart';
+export 'view_helpers.dart';

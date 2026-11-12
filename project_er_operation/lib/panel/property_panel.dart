@@ -15,7 +15,7 @@ class PropertyPanel extends StatefulWidget {
     required this.session,
     required this.nameFocus,
     required this.onManageMethods,
-    required this.onEditFunctionView,
+    required this.onEditView,
   });
   final EditorSession session;
 
@@ -26,7 +26,7 @@ class PropertyPanel extends StatefulWidget {
   final Future<void> Function() onManageMethods;
 
   /// 関数ビューの定義ダイアログを開く。
-  final Future<void> Function(int viewId) onEditFunctionView;
+  final Future<void> Function(int viewId) onEditView;
 
   @override
   State<PropertyPanel> createState() => _PropertyPanelState();
@@ -87,7 +87,7 @@ class _PropertyPanelState extends State<PropertyPanel> {
         id: id!,
         tab: tab,
         nameFocus: widget.nameFocus,
-        onEdit: () => widget.onEditFunctionView(id),
+        onEdit: () => widget.onEditView(id),
       );
     } else if (r != null) {
       body = _RelationshipProps(
@@ -1075,16 +1075,14 @@ class _ViewProps extends StatelessWidget {
             '定義: ${v.viewType == ViewType.join ? 'ソース${v.join.sources.length}件 / 出力列${v.join.columns.length}件' : '戻り列${v.function.columns.length}件'}',
           ),
           _gap(),
-          if (v.viewType == ViewType.function)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonalIcon(
-                onPressed: dis ? null : onEdit,
-                icon: const Icon(Icons.edit, size: 16),
-                label: const Text('定義を編集'),
-              ),
-            )
-          else
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: dis ? null : onEdit,
+              icon: const Icon(Icons.edit, size: 16),
+              label: const Text('定義を編集'),
+            ),
+          ),
             _hint(context, '結合ビューの定義ダイアログは今後のバージョンで対応します(定義は.peroファイルから読み込めます)'),
         ],
         _ => [
