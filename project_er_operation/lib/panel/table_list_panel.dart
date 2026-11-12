@@ -86,6 +86,15 @@ class _TableListPanelState extends State<TableListPanel> {
                   Expanded(
                       child: Text(e.displayLabel,
                           overflow: TextOverflow.ellipsis, style: TextStyle(color: color))),
+                  if (e is TableEntity && e.triggers.isNotEmpty)
+                    Container(
+                      key: ValueKey('trg${e.id}'),
+                      margin: const EdgeInsets.only(right: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      decoration: BoxDecoration(
+                          border: Border.all(color: color), borderRadius: BorderRadius.circular(3)),
+                      child: Text('トリガー${e.triggers.length}', style: TextStyle(fontSize: 10, color: color)),
+                    ),
                   Text('$cols', style: TextStyle(color: color)),
                 ]),
               ),
