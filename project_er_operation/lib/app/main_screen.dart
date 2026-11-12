@@ -73,6 +73,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     _externalSub?.cancel();
     windowManager.removeListener(this);
     nameFocus.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -192,7 +193,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
             autofocus: true,
             child: Scaffold(
               body: Column(children: [
-                _menuBar(),
+                _topBar(),
                 const Divider(height: 1),
                 Expanded(child: _body()),
                 const Divider(height: 1),
@@ -221,64 +222,89 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     return f?.context?.findAncestorWidgetOfExactType<EditableText>() != null;
   }
 
-  Widget _menuBar() {
-    MenuItemButton mi(String label, VoidCallback? onPressed, {SingleActivator? key}) =>
-        MenuItemButton(onPressed: onPressed, shortcut: null, trailingIcon: key == null ? null : Text(_keyLabel(key), style: const TextStyle(fontSize: 11)), child: Text(label));
-    final recent = s.settings.recentFiles.take(s.settings.recentFileCount).toList();
-    return Align(alignment: Alignment.centerLeft, child: MenuBar(
-      style: const MenuStyle(padding: WidgetStatePropertyAll(EdgeInsets.zero)),
-      children: [
-        SubmenuButton(menuChildren: [
-          mi(Strings.fileNew, actions.newModel, key: const SingleActivator(LogicalKeyboardKey.keyN, control: true)),
-          mi(Strings.fileOpen, actions.openFile, key: const SingleActivator(LogicalKeyboardKey.keyO, control: true)),
-          mi(Strings.fileSaveAs, actions.saveAs, key: const SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true)),
-          mi(Strings.fileSave, s.filePath == null ? null : actions.saveOverwrite, key: const SingleActivator(LogicalKeyboardKey.keyS, control: true)),
-          if (recent.isNotEmpty)
-            SubmenuButton(
-              menuChildren: [for (final p in recent) mi(p, () => actions.openPath(p))],
-              child: const Text(Strings.fileRecent),
+  // ---- トップバー: 検索(3.9) ----
+
+  final _searchController = TextEditingController();
+
+  Widget _topBar() {
+    final q = s.searchQuery;
+    final h = s.highlights;
+    final theme = Theme.of(context);
+    return SizedBox(
+      height: 40,
+      child: Center(
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          SizedBox(
+            width: 240,
+            height: 30,
+            child: TextField(
+              key: const ValueKey('searchField'),
+              controller: _searchController,
+              style: const TextStyle(fontSize: 13),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: Strings.searchHint,
+                prefixIcon: const Icon(Icons.search, size: 16),
+                prefixIconConstraints: const BoxConstraints(minWidth: 28),
+                suffixIcon: q.isEmpty
+                    ? null
+                    : InkWell(
+                        onTap: () {
+                          _searchController.clear();
+                          s.searchQuery = q.copyWith(text: '');
+                        },
+                        child: const Icon(Icons.close, size: 14),
+                      ),
+                suffixIconConstraints: const BoxConstraints(minWidth: 24),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                border: const OutlineInputBorder(),
+              ),
+              onChanged: (v) => s.searchQuery = q.copyWith(text: v),
             ),
-          const Divider(height: 1),
-          mi(Strings.fileSettings, actions.openSettings, key: const SingleActivator(LogicalKeyboardKey.comma, control: true)),
-          const Divider(height: 1),
-          mi(Strings.fileExit, actions.exit),
-        ], child: const Text(Strings.menuFile)),
-        SubmenuButton(menuChildren: [
-          mi(Strings.opUndo, s.history.canUndo ? s.undo : null, key: const SingleActivator(LogicalKeyboardKey.keyZ, control: true)),
-          mi(Strings.opRedo, s.history.canRedo ? s.redo : null, key: const SingleActivator(LogicalKeyboardKey.keyY, control: true)),
-          const Divider(height: 1),
-          mi(Strings.opAddTable, actions.addTableAtCenter),
-          mi(Strings.opAddJoinView, () => actions.addViewAtCenter(ViewType.join)),
-          mi(Strings.opAddFunctionView, () => actions.addViewAtCenter(ViewType.function)),
-          mi(Strings.opAddSqlView, () => actions.addViewAtCenter(ViewType.sql)),
-          const Divider(height: 1),
-          mi(Strings.opRemoveFromDiagram, actions.canRemoveFromDiagram ? actions.removeFromDiagram : null, key: const SingleActivator(LogicalKeyboardKey.delete)),
-          mi(Strings.opDeleteFromModel, actions.canRemoveFromDiagram ? actions.deleteFromModel : null, key: const SingleActivator(LogicalKeyboardKey.delete, control: true)),
-          const Divider(height: 1),
-          mi(Strings.opAddRelationship, actions.canAddRelationship ? actions.addRelationship : null),
-          mi(Strings.opRemoveRelationship, actions.canRemoveRelationship ? actions.removeRelationship : null),
-          const Divider(height: 1),
-          mi(Strings.opCopy, s.copySelection, key: const SingleActivator(LogicalKeyboardKey.keyC, control: true)),
-          mi(Strings.opPaste, s.clipboard == null ? null : s.paste, key: const SingleActivator(LogicalKeyboardKey.keyV, control: true)),
-          mi(Strings.opDuplicate, s.duplicateSelection, key: const SingleActivator(LogicalKeyboardKey.keyD, control: true)),
-          mi(Strings.opSelectAll, actions.selectAll, key: const SingleActivator(LogicalKeyboardKey.keyA, control: true)),
-          mi(Strings.opAutoLayout, actions.autoLayout),
-          const Divider(height: 1),
-          mi(Strings.opManageMethods, actions.manageMethods),
-          mi(Strings.opManagePatterns, actions.managePatterns),
-          mi(Strings.opManageTypes, actions.manageTypes),
-          const Divider(height: 1),
-          mi(Strings.opAddDiagram, actions.addDiagram),
-          mi(Strings.opRenameDiagram, () => actions.renameDiagram(s.diagram.id)),
-          mi(Strings.opDeleteDiagram, () => actions.deleteDiagram(s.diagram.id)),
-        ], child: const Text(Strings.menuOperation)),
-        SubmenuButton(menuChildren: [
-          mi(Strings.runGenerate, actions.generate, key: const SingleActivator(LogicalKeyboardKey.f5)),
-          mi(Strings.runJson, actions.exportJson),
-          mi(Strings.runImage, actions.exportImage),
-        ], child: const Text(Strings.menuRun)),
-      ],
-    ));
+          ),
+          const SizedBox(width: 6),
+          Tooltip(
+            message: Strings.searchRegex,
+            child: InkWell(
+              key: const ValueKey('searchRegex'),
+              borderRadius: BorderRadius.circular(4),
+              onTap: () => s.searchQuery = q.copyWith(regex: !q.regex),
+              child: Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: q.regex ? theme.colorScheme.primary.withValues(alpha: 0.2) : null,
+                  border: Border.all(color: q.regex ? theme.colorScheme.primary : theme.dividerColor),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text('.*', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          SizedBox(
+            height: 30,
+            child: DropdownButton<SearchScope>(
+              key: const ValueKey('searchScope'),
+              value: q.scope,
+              underline: const SizedBox(),
+              isDense: true,
+              style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurface),
+              items: [for (final sc in SearchScope.values) DropdownMenuItem(value: sc, child: Text(sc.label))],
+              onChanged: (v) => s.searchQuery = q.copyWith(scope: v),
+            ),
+          ),
+          const SizedBox(width: 8),
+          if (!q.isEmpty)
+            Text(
+              h.invalidRegex ? Strings.searchInvalidRegex : '${h.hitCount}${Strings.searchHitCount}',
+              key: const ValueKey('searchStatus'),
+              style: TextStyle(fontSize: 12, color: h.invalidRegex ? Colors.red : theme.hintColor),
+            ),
+        ]),
+      ),
+    );
   }
 
   String _keyLabel(SingleActivator a) {
@@ -328,33 +354,151 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     });
   }
 
-  Widget _sideMenu() {
-    Widget item(SideItem it, IconData icon, String label, VoidCallback onTap) {
-      final tile = ListTile(
-        dense: true,
-        leading: Icon(icon, size: 20),
-        title: Text(label),
-        onTap: onTap,
-      );
-      return Draggable<SideItem>(
-        data: it,
-        feedback: Material(
-          elevation: 4,
-          child: Padding(padding: const EdgeInsets.all(8), child: Text(label)),
-        ),
-        child: tile,
-      );
-    }
+  // ---- サイドメニュー(3.3): 機能別のタブ ----
 
+  int _sideTab = 0;
+
+  Widget _sideMenu() {
+    final tabs = [
+      (Icons.add_box_outlined, Strings.sideTabAdd),
+      (Icons.folder_open, Strings.menuFile),
+      (Icons.edit_outlined, Strings.menuOperation),
+      (Icons.play_arrow_outlined, Strings.menuRun),
+    ];
+    final theme = Theme.of(context);
     return SizedBox(
       width: 160,
-      child: ListView(children: [
-        item(SideItem.table, Icons.table_chart_outlined, Strings.sideTable, actions.addTableAtCenter),
-        item(SideItem.joinView, Icons.join_inner, Strings.sideJoinView, () => actions.addViewAtCenter(ViewType.join)),
-        item(SideItem.functionView, Icons.functions, Strings.sideFunctionView, () => actions.addViewAtCenter(ViewType.function)),
-        item(SideItem.sqlView, Icons.code, Strings.sideSqlView, () => actions.addViewAtCenter(ViewType.sql)),
+      child: Column(children: [
+        Row(children: [
+          for (var i = 0; i < tabs.length; i++)
+            Expanded(
+              child: Tooltip(
+                message: tabs[i].$2,
+                child: InkWell(
+                  key: ValueKey('sideTab$i'),
+                  onTap: () => setState(() => _sideTab = i),
+                  child: Container(
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: _sideTab == i ? theme.colorScheme.primary.withValues(alpha: 0.15) : null,
+                      border: Border(
+                          bottom: BorderSide(
+                              color: _sideTab == i ? theme.colorScheme.primary : Colors.transparent, width: 2)),
+                    ),
+                    child: Icon(tabs[i].$1, size: 20),
+                  ),
+                ),
+              ),
+            ),
+        ]),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Text(tabs[_sideTab].$2, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        ),
+        const Divider(height: 1),
+        Expanded(child: ListView(children: _sideTabItems())),
       ]),
     );
+  }
+
+  List<Widget> _sideTabItems() {
+    Widget mi(String label, VoidCallback? onPressed, {SingleActivator? key}) => ListTile(
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          enabled: onPressed != null,
+          title: Text(label, style: const TextStyle(fontSize: 13)),
+          subtitle: key == null ? null : Text(_keyLabel(key), style: const TextStyle(fontSize: 10)),
+          onTap: onPressed,
+        );
+    const div = Divider(height: 1);
+    switch (_sideTab) {
+      case 0:
+        Widget item(SideItem it, IconData icon, String label, VoidCallback onTap) => Draggable<SideItem>(
+              data: it,
+              feedback: Material(
+                elevation: 4,
+                child: Padding(padding: const EdgeInsets.all(8), child: Text(label)),
+              ),
+              child: ListTile(
+                dense: true,
+                leading: Icon(icon, size: 20),
+                title: Text(label),
+                onTap: onTap,
+              ),
+            );
+        return [
+          item(SideItem.table, Icons.table_chart_outlined, Strings.sideTable, actions.addTableAtCenter),
+          item(SideItem.joinView, Icons.join_inner, Strings.sideJoinView, () => actions.addViewAtCenter(ViewType.join)),
+          item(SideItem.functionView, Icons.functions, Strings.sideFunctionView, () => actions.addViewAtCenter(ViewType.function)),
+          item(SideItem.sqlView, Icons.code, Strings.sideSqlView, () => actions.addViewAtCenter(ViewType.sql)),
+        ];
+      case 1:
+        final recent = s.settings.recentFiles.take(s.settings.recentFileCount).toList();
+        return [
+          mi(Strings.fileNew, actions.newModel, key: const SingleActivator(LogicalKeyboardKey.keyN, control: true)),
+          mi(Strings.fileOpen, actions.openFile, key: const SingleActivator(LogicalKeyboardKey.keyO, control: true)),
+          mi(Strings.fileSaveAs, actions.saveAs, key: const SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true)),
+          mi(Strings.fileSave, s.filePath == null ? null : actions.saveOverwrite, key: const SingleActivator(LogicalKeyboardKey.keyS, control: true)),
+          if (recent.isNotEmpty)
+            ExpansionTile(
+              key: const ValueKey('recentFiles'),
+              dense: true,
+              tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+              title: const Text(Strings.fileRecent, style: TextStyle(fontSize: 13)),
+              children: [
+                for (final p in recent)
+                  ListTile(
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
+                    title: Text(p.substring(p.lastIndexOf(Platform.pathSeparator) + 1),
+                        style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis),
+                    subtitle: Text(p, style: const TextStyle(fontSize: 9), overflow: TextOverflow.ellipsis),
+                    onTap: () => actions.openPath(p),
+                  ),
+              ],
+            ),
+          div,
+          mi(Strings.fileSettings, actions.openSettings, key: const SingleActivator(LogicalKeyboardKey.comma, control: true)),
+          div,
+          mi(Strings.fileExit, actions.exit),
+        ];
+      case 2:
+        return [
+          mi(Strings.opUndo, s.history.canUndo ? s.undo : null, key: const SingleActivator(LogicalKeyboardKey.keyZ, control: true)),
+          mi(Strings.opRedo, s.history.canRedo ? s.redo : null, key: const SingleActivator(LogicalKeyboardKey.keyY, control: true)),
+          div,
+          mi(Strings.opAddTable, actions.addTableAtCenter),
+          mi(Strings.opAddJoinView, () => actions.addViewAtCenter(ViewType.join)),
+          mi(Strings.opAddFunctionView, () => actions.addViewAtCenter(ViewType.function)),
+          mi(Strings.opAddSqlView, () => actions.addViewAtCenter(ViewType.sql)),
+          div,
+          mi(Strings.opRemoveFromDiagram, actions.canRemoveFromDiagram ? actions.removeFromDiagram : null, key: const SingleActivator(LogicalKeyboardKey.delete)),
+          mi(Strings.opDeleteFromModel, actions.canRemoveFromDiagram ? actions.deleteFromModel : null, key: const SingleActivator(LogicalKeyboardKey.delete, control: true)),
+          div,
+          mi(Strings.opAddRelationship, actions.canAddRelationship ? actions.addRelationship : null),
+          mi(Strings.opRemoveRelationship, actions.canRemoveRelationship ? actions.removeRelationship : null),
+          div,
+          mi(Strings.opCopy, s.copySelection, key: const SingleActivator(LogicalKeyboardKey.keyC, control: true)),
+          mi(Strings.opPaste, s.clipboard == null ? null : s.paste, key: const SingleActivator(LogicalKeyboardKey.keyV, control: true)),
+          mi(Strings.opDuplicate, s.duplicateSelection, key: const SingleActivator(LogicalKeyboardKey.keyD, control: true)),
+          mi(Strings.opSelectAll, actions.selectAll, key: const SingleActivator(LogicalKeyboardKey.keyA, control: true)),
+          mi(Strings.opAutoLayout, actions.autoLayout),
+          div,
+          mi(Strings.opManageMethods, actions.manageMethods),
+          mi(Strings.opManagePatterns, actions.managePatterns),
+          mi(Strings.opManageTypes, actions.manageTypes),
+          div,
+          mi(Strings.opAddDiagram, actions.addDiagram),
+          mi(Strings.opRenameDiagram, () => actions.renameDiagram(s.diagram.id)),
+          mi(Strings.opDeleteDiagram, () => actions.deleteDiagram(s.diagram.id)),
+        ];
+      default:
+        return [
+          mi(Strings.runGenerate, actions.generate, key: const SingleActivator(LogicalKeyboardKey.f5)),
+          mi(Strings.runJson, actions.exportJson),
+          mi(Strings.runImage, actions.exportImage),
+        ];
+    }
   }
 
   Widget _tabBar() {

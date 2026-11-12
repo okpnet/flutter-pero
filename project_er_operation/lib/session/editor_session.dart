@@ -43,6 +43,38 @@ class EditorSession extends ChangeNotifier {
   ErModel get model => history.model;
   bool get isDirty => history.isDirty;
 
+  // ---- 検索(3.9) ----
+
+  SearchQuery _searchQuery = const SearchQuery();
+  int _revision = 0;
+  (SearchQuery, int)? _highlightKey;
+  SearchHighlights _highlights = SearchHighlights.none;
+
+  SearchQuery get searchQuery => _searchQuery;
+
+  set searchQuery(SearchQuery q) {
+    if (q == _searchQuery) return;
+    _searchQuery = q;
+    notifyListeners();
+  }
+
+  /// 検索のヒット。条件とモデルが変わったときだけ再計算する。
+  SearchHighlights get highlights {
+    if (_searchQuery.isEmpty) return SearchHighlights.none;
+    final key = (_searchQuery, _revision);
+    if (_highlightKey != key) {
+      _highlightKey = key;
+      _highlights = searchModel(model, _searchQuery);
+    }
+    return _highlights;
+  }
+
+  @override
+  void notifyListeners() {
+    _revision++;
+    super.notifyListeners();
+  }
+
   String get fileNameForTitle {
     final p = filePath;
     if (p == null) return Strings.untitled;

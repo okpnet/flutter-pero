@@ -411,7 +411,7 @@ class DiagramCanvasState extends State<DiagramCanvas> {
                   scale: v.zoom,
                   offset: Offset(v.scrollX, v.scrollY),
                   fontFamily: s.settings.fontFamily.isEmpty ? null : s.settings.fontFamily,
-
+                  highlights: s.highlights,
                 ),
               ),
             ),

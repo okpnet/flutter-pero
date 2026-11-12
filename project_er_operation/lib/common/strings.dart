@@ -50,6 +50,11 @@ class Strings {
   static const sideJoinView = '結合ビュー';
   static const sideFunctionView = '関数ビュー';
   static const sideSqlView = 'SQLビュー';
+  static const sideTabAdd = '追加';
+  static const searchHint = '検索';
+  static const searchRegex = '正規表現';
+  static const searchHitCount = '件ヒット';
+  static const searchInvalidRegex = '正規表現が不正です';
 
   // ダイアログ・メッセージ
   static const save = '保存';

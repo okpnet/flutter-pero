@@ -66,8 +66,12 @@ class DiagramPainter extends CustomPainter {
     this.forExport = false,
     this.fontFamily,
     this.clipRect,
+    this.highlights = SearchHighlights.none,
     super.repaint,
   });
+
+  /// 検索のヒット(3.9)。画像出力には含めない。
+  final SearchHighlights highlights;
 
   final ErModel model;
   final Diagram diagram;
@@ -130,6 +134,7 @@ class DiagramPainter extends CustomPainter {
       final dragging = positionOverride.containsKey(e.id) && !forExport;
       if (dragging) canvas.saveLayer(r.inflate(6), Paint()..color = const Color(0x99FFFFFF));
       _paintEntity(canvas, e, r, p.collapsed, selection.contains(e.id) && !forExport);
+      if (!forExport) _paintHighlight(canvas, e, r, p.collapsed);
       if (dragging) canvas.restore();
     }
     final cd = columnDrag;
@@ -378,6 +383,34 @@ class DiagramPainter extends CustomPainter {
           ..color = selected ? colors.selection : colors.pageBorder
           ..style = PaintingStyle.stroke
           ..strokeWidth = selected ? 2.5 : 1);
+  }
+
+  static const Color _hlLight = Color(0x33FFC107);
+  static const Color _hlStrong = Color(0x99FF9800);
+
+  /// 検索のヒット(3.9): 親は薄く、子(列行、ヘッダ)は濃く重ねる。
+  void _paintHighlight(Canvas canvas, Entity e, Rect r, bool collapsed) {
+    if (highlights.isEmpty) return;
+    final headerH = layouter.headerHeight;
+    if (highlights.light.contains(e.id)) canvas.drawRect(r, Paint()..color = _hlLight);
+    if (highlights.strongHeaders.contains(e.id)) {
+      canvas.drawRect(Rect.fromLTWH(r.left, r.top, r.width, headerH), Paint()..color = _hlStrong);
+    }
+    final rows = highlights.strongRows[e.id];
+    if (rows != null && !collapsed) {
+      final rh = layouter.rowHeight;
+      for (final i in rows) {
+        canvas.drawRect(Rect.fromLTWH(r.left, r.top + headerH + i * rh, r.width, rh), Paint()..color = _hlStrong);
+      }
+    }
+    if (highlights.light.contains(e.id) || highlights.strongHeaders.contains(e.id)) {
+      canvas.drawRect(
+          r,
+          Paint()
+            ..color = const Color(0xFFFF9800)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = highlights.strongHeaders.contains(e.id) || rows != null ? 2 : 1);
+    }
   }
 
   void _glyph(Canvas canvas, IconData icon, Offset center, double size, Color color) {
