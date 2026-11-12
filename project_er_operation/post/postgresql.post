@@ -1,0 +1,139 @@
+// @post name=PostgreSQL targetDb=postgresql apiVersion=1
+//
+// PERO 同梱のポストファイル(PostgreSQL用)。生成用JSON(apiVersion 1)からSQLを作る。
+// 出力順: 開始クエリ → ファンクション → テーブル → 外部キー → ビュー → トリガー → 終了クエリ
+//
+// トリガーの本体の規約:
+//   公開(public)のメソッド: 本体は「トリガー関数を定義するSQL」。ポストファイルは同じメソッドを1回だけ出力し、
+//                          `EXECUTE FUNCTION <メソッド名>()` で参照する。
+//   入力(inline): 本体は「トリガー関数を定義するSQL」で、関数名を `{{trigger}}` にする。
+//                 `EXECUTE FUNCTION <トリガー名>()` で参照する。
+function main(jsonText) {
+  var m = JSON.parse(jsonText);
+  var out = [];
+
+  var RESERVED = ('all analyse analyze and any array as asc asymmetric both case cast check collate column ' +
+    'constraint create current_catalog current_date current_role current_time current_timestamp current_user ' +
+    'default deferrable desc distinct do else end except false fetch for foreign from grant group having in ' +
+    'initially intersect into lateral leading limit localtime localtimestamp not null offset on only or order ' +
+    'placing primary references returning select session_user some symmetric system_user table then to ' +
+    'trailing true union unique user using variadic when where window with').split(' ');
+
+  function q(name) {
+    if (/^[a-z_][a-z0-9_]*$/.test(name) && RESERVED.indexOf(name) < 0) return name;
+    return '"' + name.replace(/"/g, '""') + '"';
+  }
+  function lit(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
+  function list(names) { return names.map(q).join(', '); }
+  function endSemi(s) {
+    var t = s.replace(/\s+$/, '');
+    return /;$/.test(t) ? t : t + ';';
+  }
+  function push(s) { if (s !== null && s !== undefined && String(s).replace(/\s+/g, '') !== '') out.push(String(s).replace(/\s+$/, '')); }
+
+  function defaultText(c) {
+    var d = c.default;
+    if (d.kind === 'method') return d.call;
+    if (d.kind !== 'value') return null;
+    switch (c.typeCategory) {
+      case 'number':
+      case 'boolean':
+      case 'auto':
+        return d.value;
+      default:
+        return lit(d.value);
+    }
+  }
+
+  // 1. 開始クエリ
+  push(m.model.startQuery);
+
+  // 2. ファンクション(定義の本体があり、外部定義でないもの)
+  m.methods.forEach(function (f) {
+    if (f.kind === 'function' && !f.external && f.body.replace(/\s+/g, '') !== '') push(endSemi(f.body));
+  });
+
+  // 3. テーブル(依存順)
+  m.tables.forEach(function (t) {
+    push(t.preQuery);
+    var lines = t.columns.map(function (c) {
+      var s = '  ' + q(c.physicalName) + ' ' + c.type;
+      var d = defaultText(c);
+      if (d !== null && d !== '') s += ' DEFAULT ' + d;
+      if (c.notNull) s += ' NOT NULL';
+      return s;
+    });
+    if (t.primaryKey) {
+      lines.push('  CONSTRAINT ' + q(t.primaryKey.name) + ' PRIMARY KEY (' + list(t.primaryKey.columns) + ')');
+    }
+    push('CREATE TABLE ' + q(t.physicalName) + ' (\n' + lines.join(',\n') + '\n);');
+    t.indexes.forEach(function (i) {
+      push('CREATE INDEX ' + q(i.name) + ' ON ' + q(t.physicalName) + ' (' + list(i.columns) + ');');
+    });
+    t.uniques.forEach(function (u) {
+      push('ALTER TABLE ' + q(t.physicalName) + ' ADD CONSTRAINT ' + q(u.name) + ' UNIQUE (' + list(u.columns) + ');');
+    });
+    if (t.comment) push('COMMENT ON TABLE ' + q(t.physicalName) + ' IS ' + lit(t.comment) + ';');
+    t.columns.forEach(function (c) {
+      if (c.comment) push('COMMENT ON COLUMN ' + q(t.physicalName) + '.' + q(c.physicalName) + ' IS ' + lit(c.comment) + ';');
+    });
+    push(t.postQuery);
+  });
+
+  // 4. 外部キー(deferred を含め、すべてのテーブルの作成後に出力する)
+  m.foreignKeys.forEach(function (f) {
+    var s = 'ALTER TABLE ' + q(f.childTable) + ' ADD CONSTRAINT ' + q(f.name) +
+      ' FOREIGN KEY (' + list(f.columns.map(function (c) { return c.child; })) + ')' +
+      ' REFERENCES ' + q(f.parentTable) + ' (' + list(f.columns.map(function (c) { return c.parent; })) + ')';
+    if (f.onDelete) s += ' ON DELETE ' + f.onDelete;
+    if (f.onUpdate) s += ' ON UPDATE ' + f.onUpdate;
+    push(s + ';');
+  });
+
+  // 5. ビュー
+  function qualified(expr) {
+    var i = expr.indexOf('.');
+    return i < 0 ? q(expr) : q(expr.substring(0, i)) + '.' + q(expr.substring(i + 1));
+  }
+  m.views.forEach(function (v) {
+    push(v.preQuery);
+    var body;
+    if (v.viewType === 'function') {
+      body = 'SELECT * FROM ' + v.function.name + '(' + v.function.args.join(', ') + ')';
+    } else {
+      body = 'SELECT ' + v.columns.map(function (c) { return qualified(c.expr) + ' AS ' + q(c.name); }).join(', ') +
+        '\nFROM ' + q(v.from.table) + ' ' + q(v.from.alias);
+      v.joins.forEach(function (j) {
+        body += '\n' + j.type + ' JOIN ' + q(j.table) + ' ' + q(j.alias) + ' ON ' +
+          j.on.map(function (o) { return qualified(o.left) + ' = ' + qualified(o.right); }).join(' AND ');
+      });
+      if (v.where) body += '\nWHERE ' + v.where;
+    }
+    push('CREATE VIEW ' + q(v.physicalName) + ' AS\n' + body + ';');
+    if (v.comment) push('COMMENT ON VIEW ' + q(v.physicalName) + ' IS ' + lit(v.comment) + ';');
+    push(v.postQuery);
+  });
+
+  // 6. トリガー
+  var emitted = {};
+  m.tables.forEach(function (t) {
+    t.triggers.forEach(function (g) {
+      var fn = g.name;
+      if (g.methodName !== null) {
+        fn = g.methodName;
+        if (!emitted[fn]) { emitted[fn] = true; push(endSemi(g.body)); }
+      } else {
+        push(endSemi(g.body));
+      }
+      var s = 'CREATE TRIGGER ' + q(g.name) + ' ' + g.timing + ' ' + g.events.join(' OR ') +
+        ' ON ' + q(t.physicalName) + ' FOR EACH ' + g.forEach;
+      if (g.when) s += ' WHEN (' + g.when + ')';
+      push(s + ' EXECUTE FUNCTION ' + q(fn) + '();');
+    });
+  });
+
+  // 7. 終了クエリ
+  push(m.model.endQuery);
+
+  return out.join('\n\n') + '\n';
+}
