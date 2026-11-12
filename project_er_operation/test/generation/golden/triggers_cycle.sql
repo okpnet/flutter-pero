@@ -1,0 +1,34 @@
+SET client_encoding = 'UTF8';
+
+CREATE TABLE b (
+  id integer NOT NULL,
+  a_id integer,
+  CONSTRAINT b_pk PRIMARY KEY (id)
+);
+
+-- pre a
+
+CREATE TABLE a (
+  id integer NOT NULL,
+  b_id integer,
+  updated timestamp,
+  CONSTRAINT a_pk PRIMARY KEY (id)
+);
+
+-- post a
+
+ALTER TABLE a ADD CONSTRAINT a_fk1 FOREIGN KEY (b_id) REFERENCES b (id) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+ALTER TABLE b ADD CONSTRAINT b_fk1 FOREIGN KEY (a_id) REFERENCES a (id) ON DELETE SET NULL;
+
+CREATE FUNCTION touch_updated() RETURNS trigger AS $$ BEGIN NEW.updated = now(); RETURN NEW; END $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER b_trg01 AFTER INSERT ON b FOR EACH STATEMENT EXECUTE FUNCTION touch_updated();
+
+CREATE FUNCTION b_trg02() RETURNS trigger AS $$ BEGIN RETURN NEW; END $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER b_trg02 BEFORE INSERT ON b FOR EACH ROW EXECUTE FUNCTION b_trg02();
+
+CREATE TRIGGER a_trg01 BEFORE INSERT OR UPDATE ON a FOR EACH ROW WHEN (OLD.* IS DISTINCT FROM NEW.*) EXECUTE FUNCTION touch_updated();
+
+-- end of file
