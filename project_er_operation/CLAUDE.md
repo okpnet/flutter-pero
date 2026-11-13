@@ -594,7 +594,7 @@ ER図作成アプリ「PERO」の仕様書。本書は実装用の指示書と�
    20. ファイル、ネットワーク、タイマーは使えない。`console.log` はログ(info)に記録する。
    21. 先頭10行以内に、次の形式のメタ情報を必ず書く: `// @post name=<表示名> targetDb=<dbKind> apiVersion=<整数>`
    22. 生成用JSONのスキーマは付録B。`apiVersion` は現在2。付録Bを変更するときは `apiVersion` を上げる。
-23. 同梱のポストファイルは `postpostgresql.post`(PostgreSQL用。既定)、`postmysql.post`(MySQL 8.0用)、`postsqlserver.post`(SQL Server 2016 SP1以降のT-SQL用)。MySQL・SQL Serverにない機能(ユーザー定義型、DEFERRABLE、トリガーのWHEN・UPDATE OF・BEFORE など)は、出力せず、`-- [PERO] ...` のコメントで残す。MySQLのトリガーはイベントごとに分け、SQL Serverのビュー・トリガー・ファンクションは `GO` で区切る。ポストファイルのフォルダと既定のファイルは設定による(10.2)。ポストフォルダは、ビルド時に実行ファイルと同じフォルダ内へコピーする。
+23. 同梱のポストファイルは `post\postgresql.post`(PostgreSQL用。既定)、`post\mysql.post`(MySQL 8.0用)、`post\sqlserver.post`(SQL Server 2016 SP1以降のT-SQL用)。MySQL・SQL Serverにない機能(ユーザー定義型、DEFERRABLE、トリガーのWHEN・UPDATE OF・BEFORE など)は、出力せず、`-- [PERO] ...` のコメントで残す。MySQLのトリガーはイベントごとに分け、SQL Serverのビュー・トリガー・ファンクションは `GO` で区切る。ポストファイルのフォルダと既定のファイルは設定による(10.2)。ポストフォルダは、ビルド時に実行ファイルと同じフォルダ内へコピーする。
 24. 再実行用のDROP: 設定(10.2)の「再実行用のDROP文を付ける」が有効のとき、生成用JSONの `model.dropBeforeCreate` が真になり、ポストファイルは、ユーザー定義型・テーブル(`CASCADE`)・ビューの CREATE の前に `DROP ... IF EXISTS` を出力する。ファンクションは、本体を `CREATE OR REPLACE` で書くことで再実行できるため、DROPしない。
 25. スキーマ: 出力にスキーマを含めるとき、生成用JSONの `schemas`、テーブルとビューの `schema`(エンティティのスキーマ。5.2-1)を使って、ポストファイルはテーブル名・ビュー名を `スキーマ.名前` で出力する(外部キーの両端、結合ビューのソースを含む)。ファンクション、ユーザー定義型、トリガー、制約・インデックスの名前にはスキーマを付けない(本体の記述に従う)。
 
