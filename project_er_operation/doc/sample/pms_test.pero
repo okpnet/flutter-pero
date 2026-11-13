@@ -7,8 +7,8 @@
     "outputFileName": "pms_test",
     "outputFolder": "",
     "targetDb": "postgresql",
-    "postPath": "",
-    "startQuery": "SET search_path TO tests, public;",
+    "postPath": "C:\\Users\\隼人さん\\AppData\\Local\\Programs\\PERO\\post\\postgresql.post",
+    "startQuery": "\\c test_avocado\nSET search_path TO tests, public;",
     "endQuery": "-- [PERO 取り込みログ] 取り込めなかった要素\n-- 取り込まない文: DROP VIEW IF × 163\n-- 取り込まない文: DROP TRIGGER IF × 3\n-- 取り込まない文: 主キーと重複するユニークインデックス(取り込まない) × 263",
     "schema": "tests",
     "includeSchema": true

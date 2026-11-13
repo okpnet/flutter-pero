@@ -62,6 +62,39 @@ void main() {
     return s;
   }
 
+  testWidgets('テキスト入力中は、Ctrl+V / Ctrl+A / Ctrl+C / Delete などをテキスト側で処理する(図形の貼り付け・全選択・削除を起こさない)', (tester) async {
+    final s = await pump(tester);
+    String? clip = 'pasted text';
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') return {'text': clip};
+      if (call.method == 'Clipboard.setData') {
+        clip = (call.arguments as Map)['text'] as String?;
+      }
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    final tablesBefore = s.model.tables.length;
+    s.setSelection([s.model.tables.first.id]);
+    s.copySelection(); // 図形のクリップボードがある状態
+    await tester.tap(find.byKey(const ValueKey('searchField')));
+    await tester.pump();
+    Future<void> ctrl(LogicalKeyboardKey k) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(k);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+    }
+
+    await ctrl(LogicalKeyboardKey.keyV);
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('searchField'))).controller!.text, 'pasted text');
+    expect(s.model.tables.length, tablesBefore); // 図形は貼り付けられない
+    await ctrl(LogicalKeyboardKey.keyA); // テキストの全選択
+    await tester.sendKeyEvent(LogicalKeyboardKey.delete); // 選択したテキストを削除(図形は削除しない)
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byKey(const ValueKey('searchField'))).controller!.text, '');
+    expect(s.model.tables.length, tablesBefore);
+  });
+
   testWidgets('ダイアグラムの切替ショートカット: Ctrl+Tab / Ctrl+Shift+Tab(循環)、Ctrl+1〜9(4.5)', (tester) async {
     final s = await pump(tester);
     s.model.diagrams.add(Diagram(id: s.model.allocateId(), name: '2'));

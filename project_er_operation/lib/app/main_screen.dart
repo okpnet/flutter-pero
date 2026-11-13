@@ -237,31 +237,40 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
       listenable: s,
       builder: (context, _) {
         _updateTitle();
-        return CallbackShortcuts(
-          bindings: {
-            const SingleActivator(LogicalKeyboardKey.keyN, control: true): actions.newModel,
-            const SingleActivator(LogicalKeyboardKey.keyO, control: true): actions.openFile,
-            const SingleActivator(LogicalKeyboardKey.keyS, control: true): actions.saveOverwrite,
-            const SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true): actions.saveAs,
-            const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
-            const SingleActivator(LogicalKeyboardKey.keyY, control: true): _redo,
-            const SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true): _redo,
-            const SingleActivator(LogicalKeyboardKey.keyC, control: true): s.copySelection,
-            const SingleActivator(LogicalKeyboardKey.keyV, control: true): s.paste,
-            const SingleActivator(LogicalKeyboardKey.keyD, control: true): s.duplicateSelection,
-            const SingleActivator(LogicalKeyboardKey.keyA, control: true): actions.selectAll,
-            const SingleActivator(LogicalKeyboardKey.delete): actions.removeFromDiagram,
-            const SingleActivator(LogicalKeyboardKey.delete, control: true): actions.deleteFromModel,
-            const SingleActivator(LogicalKeyboardKey.escape): () => s.setSelection([]),
-            const SingleActivator(LogicalKeyboardKey.f5): actions.generate,
-            const SingleActivator(LogicalKeyboardKey.comma, control: true): actions.openSettings,
-            const SingleActivator(LogicalKeyboardKey.digit0, control: true): () => canvasKey.currentState?.resetZoom(),
-            const SingleActivator(LogicalKeyboardKey.tab, control: true): () => s.cycleDiagram(1),
-            const SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true): () => s.cycleDiagram(-1),
+        // テキスト入力中は、コピー・貼り付け・全選択・元に戻すなど、テキスト側の操作を優先する。
+        // 無効な Action は、キーイベントを消費せずに上位(標準のテキスト編集)へ渡す。
+        KeyboardShortcutHandler k(VoidCallback run, {bool text = false}) => KeyboardShortcutHandler(run, handlesText: text);
+        return Shortcuts(
+          shortcuts: <ShortcutActivator, Intent>{
+            const SingleActivator(LogicalKeyboardKey.keyN, control: true): k(actions.newModel, text: true),
+            const SingleActivator(LogicalKeyboardKey.keyO, control: true): k(actions.openFile, text: true),
+            const SingleActivator(LogicalKeyboardKey.keyS, control: true): k(actions.saveOverwrite, text: true),
+            const SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true): k(actions.saveAs, text: true),
+            const SingleActivator(LogicalKeyboardKey.keyZ, control: true): k(_undo),
+            const SingleActivator(LogicalKeyboardKey.keyY, control: true): k(_redo),
+            const SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true): k(_redo),
+            const SingleActivator(LogicalKeyboardKey.keyC, control: true): k(s.copySelection),
+            const SingleActivator(LogicalKeyboardKey.keyV, control: true): k(s.paste),
+            const SingleActivator(LogicalKeyboardKey.keyD, control: true): k(s.duplicateSelection),
+            const SingleActivator(LogicalKeyboardKey.keyA, control: true): k(actions.selectAll),
+            const SingleActivator(LogicalKeyboardKey.delete): k(actions.removeFromDiagram),
+            const SingleActivator(LogicalKeyboardKey.delete, control: true): k(actions.deleteFromModel),
+            const SingleActivator(LogicalKeyboardKey.escape): k(() => s.setSelection([]), text: true),
+            const SingleActivator(LogicalKeyboardKey.f5): k(actions.generate, text: true),
+            const SingleActivator(LogicalKeyboardKey.comma, control: true): k(actions.openSettings, text: true),
+            const SingleActivator(LogicalKeyboardKey.digit0, control: true):
+                k(() => canvasKey.currentState?.resetZoom(), text: true),
+            const SingleActivator(LogicalKeyboardKey.tab, control: true): k(() => s.cycleDiagram(1), text: true),
+            const SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true):
+                k(() => s.cycleDiagram(-1), text: true),
             for (var n = 1; n <= 9; n++)
               SingleActivator(LogicalKeyboardKey(LogicalKeyboardKey.digit1.keyId + n - 1), control: true):
-                  () => s.selectDiagramAt(n - 1),
+                  k(() => s.selectDiagramAt(n - 1), text: true),
           },
+          child: Actions(
+            actions: <Type, Action<Intent>>{
+              KeyboardShortcutHandler: KeyboardShortcutAction(() => _editingText),
+            },
           child: Focus(
             autofocus: true,
             child: Scaffold(
@@ -276,6 +285,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
                 _busyOverlay(),
               ]),
             ),
+          ),
           ),
         );
       },
@@ -827,3 +837,26 @@ String? peroPathFromArgs(List<String> args) {
   return null;
 }
 
+
+/// キーボードショートカットの処理(Command パターン)。[handlesText] が偽のものは、
+/// テキスト入力中は無効になり、キーイベントを消費しない(貼り付けなど、テキスト側の操作を優先する)。
+class KeyboardShortcutHandler extends Intent {
+  const KeyboardShortcutHandler(this.run, {this.handlesText = false});
+  final VoidCallback run;
+  final bool handlesText;
+}
+
+class KeyboardShortcutAction extends Action<KeyboardShortcutHandler> {
+  KeyboardShortcutAction(this.editingText);
+  final bool Function() editingText;
+
+  @override
+  bool isEnabled(KeyboardShortcutHandler intent) =>
+      intent.handlesText || !editingText();
+
+  @override
+  Object? invoke(KeyboardShortcutHandler intent) {
+    intent.run();
+    return null;
+  }
+}
