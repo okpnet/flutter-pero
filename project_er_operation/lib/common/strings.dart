@@ -31,6 +31,13 @@ class Strings {
   static const opDuplicate = '複製';
   static const opSelectAll = '全選択';
   static const opAutoLayout = '自動配置';
+  static const hideSideMenu = 'サイドメニューを隠す';
+  static const showSideMenu = 'サイドメニューを表示';
+  static const hideRightPane = 'プロパティを隠す';
+  static const showRightPane = 'プロパティを表示';
+  static const autoLayoutNothing = '自動配置の対象がありません';
+  static const autoLayoutFailed = '自動配置に失敗しました';
+  static String autoLayoutDone(int n) => '自動配置: $n件を配置しました';
   static const opManageMethods = 'メソッド管理';
   static const opManagePatterns = '共通列パターン管理';
   static const opManageTypes = '型管理';
@@ -70,6 +77,7 @@ class Strings {
   static const restoreTitle = '復元';
   static const restoreMessage = '前回は異常終了しました。編集中の内容を復元しますか?';
   static const error = 'エラー';
+  static const warning = '警告';
   static const confirm = '確認';
   static const tableListHeader = 'テーブルリスト';
   static const search = '検索';

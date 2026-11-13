@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../command/command.dart';
+import '../generation/generation.dart';
 import '../common/common.dart';
 import '../logging/logging.dart';
 import '../model/model.dart';
@@ -40,6 +41,9 @@ class EditorSession extends ChangeNotifier {
   Timer? _backupTimer;
   int _lastBackupPos = -1;
 
+  /// ズーム・スクロールの変更通知(9.1-6でUndo対象外)。画面全体ではなく、キャンバスとズーム表示だけが購読する。
+  final ValueNotifier<int> viewTick = ValueNotifier<int>(0);
+
   ErModel get model => history.model;
   bool get isDirty => history.isDirty;
 
@@ -72,6 +76,7 @@ class EditorSession extends ChangeNotifier {
   @override
   void notifyListeners() {
     _revision++;
+    _updateKindFilter();
     super.notifyListeners();
   }
 
@@ -91,12 +96,55 @@ class EditorSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  EntityLayouter get layouter => EntityLayouter(model, settings.displayOptions);
+  // 寸法などをメモ化したレイアウタ。モデルが変わる操作(run/undo/redo/読込)と設定の適用で作り直す。
+  EntityLayouter? _layouter;
+  ErModel? _layouterModel;
+  AppSettings? _layouterSettings;
+
+  /// モデルまたは表示設定が変わるたびに増える番号(描画キャッシュの無効化に使う)。
+  int layoutGeneration = 0;
+
+  void invalidateLayout() {
+    _layouter = null;
+    layoutGeneration++;
+  }
+
+  EntityLayouter get layouter {
+    if (_layouter == null || !identical(_layouterModel, model) || !identical(_layouterSettings, settings)) {
+      _layouter = EntityLayouter(model, settings.displayOptions);
+      _layouterModel = model;
+      _layouterSettings = settings;
+      layoutGeneration++;
+    }
+    return _layouter!;
+  }
+
+  // ---- ポストファイル(9.6) ----
+
+  /// ポストフォルダの内容。起動時と設定の適用時に走査する。
+  PostCatalog postCatalog = const PostCatalog.empty();
+
+  String postFolderPath() => settings.postFolder.isNotEmpty
+      ? settings.postFolder
+      : '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}post';
+
+  void rescanPosts() {
+    postCatalog = PostCatalog.scan(postFolderPath());
+    logger.info('ポストファイルを走査: ${postCatalog.files.length}件(有効${postCatalog.valid.length}件) ${postFolderPath()}');
+    _updateKindFilter();
+  }
+
+  /// ポストファイルがある、データベースの種類(kind)。
+  Set<DbKind> get availableKinds => postCatalog.kinds(settings.postKinds);
+
+  /// 画面に表示する種類を更新する。モデルが使っている対象DBは、ポストファイルが無くても表示する。
+  void _updateKindFilter() {
+    final k = availableKinds;
+    DbKindFilter.visibleKinds = k.isEmpty ? null : {...k, model.properties.targetDb};
+  }
 
   String defaultPostPath() {
-    final folder = settings.postFolder.isNotEmpty
-        ? settings.postFolder
-        : '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}post';
+    final folder = postFolderPath();
     return '$folder${Platform.pathSeparator}${settings.postFile}';
   }
 
@@ -133,10 +181,12 @@ class EditorSession extends ChangeNotifier {
     try {
       history.execute(cmd);
     } on CommandException catch (e) {
+      invalidateLayout();
       statusMessage = e.message;
       notifyListeners();
       return false;
     }
+    invalidateLayout();
     _pruneSelection();
     statusMessage = null;
     notifyListeners();
@@ -145,12 +195,14 @@ class EditorSession extends ChangeNotifier {
 
   void undo() {
     history.undo();
+    invalidateLayout();
     _pruneSelection();
     notifyListeners();
   }
 
   void redo() {
     history.redo();
+    invalidateLayout();
     _pruneSelection();
     notifyListeners();
   }
@@ -173,7 +225,7 @@ class EditorSession extends ChangeNotifier {
     if (zoom != null) v.zoom = zoom.clamp(0.25, 4.0);
     if (scrollX != null) v.scrollX = scrollX;
     if (scrollY != null) v.scrollY = scrollY;
-    notifyListeners();
+    viewTick.value++; // 画面全体は再構築せず、キャンバスとズーム表示だけを更新する
   }
 
   // ---- クリップボード(4.2-13) ----
@@ -346,6 +398,7 @@ class EditorSession extends ChangeNotifier {
   @override
   void dispose() {
     _backupTimer?.cancel();
+    viewTick.dispose();
     super.dispose();
   }
 }

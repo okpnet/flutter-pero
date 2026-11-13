@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -404,11 +405,24 @@ class EditorActions implements CanvasHost {
       ]);
 
   void autoLayout() {
-    final sel = _selectedEntityIds;
-    final moves = computeAutoLayout(session.model, session.diagram, session.layouter,
-        selected: sel, spacing: session.settings.alignSpace);
-    if (moves.isEmpty) return;
-    session.run(MovePlacementsCommand(session.diagram.id, moves));
+    try {
+      final sel = _selectedEntityIds;
+      final moves = computeAutoLayout(session.model, session.diagram, session.layouter,
+          selected: sel, spacing: session.settings.alignSpace);
+      if (moves.isEmpty) {
+        session.notify(Strings.autoLayoutNothing);
+        return;
+      }
+      if (!session.run(MovePlacementsCommand(session.diagram.id, moves))) return;
+      // 配置し直した結果が見えるように、配置した範囲の左上へスクロールする(元の位置のままだと変化が見えない)。
+      final minX = moves.values.map((v) => v[0]).reduce(math.min);
+      final minY = moves.values.map((v) => v[1]).reduce(math.min);
+      session.setView(scrollX: math.max(0, minX - 40), scrollY: math.max(0, minY - 40));
+      session.notify(Strings.autoLayoutDone(moves.length));
+    } on Object catch (e, st) {
+      session.logger.error('自動配置に失敗', e, st);
+      session.notify('${Strings.autoLayoutFailed}: $e');
+    }
   }
 
   void toggleLockSelection() {
@@ -564,14 +578,11 @@ class EditorActions implements CanvasHost {
 
   Future<void> generate() async {
     final ctx = _ctx;
-    final model = session.model;
     final logger = session.logger;
-    // ポストファイルの確認(9.6-1-2)
-    var postPath = model.properties.postPath;
-    if (postPath.isEmpty || !File(postPath).existsSync()) {
-      final folder = session.settings.postFolder.isNotEmpty
-          ? session.settings.postFolder
-          : '${File(Platform.resolvedExecutable).parent.path}${Platform.pathSeparator}post';
+    // ポストファイルの確認(9.6-1-2)。パスが空のときだけ、ファイルを選ばせる。
+    var postPath = session.model.properties.postPath;
+    if (postPath.isEmpty) {
+      final folder = session.postFolderPath();
       final picked = await dialogs.pickOpen(
         title: 'ポストファイルを選択',
         extensions: ['post'],
@@ -581,28 +592,51 @@ class EditorActions implements CanvasHost {
       postPath = picked;
       session.run(UpdateModelPropertiesCommand({'postPath': postPath}));
     }
-    final String script;
+    // 指定されたポストファイルを、生成の間ロックする(存在しないときは処理を止める)。
+    final LockedPostFile locked;
     try {
-      script = await File(postPath).readAsString(encoding: utf8);
-    } on Object catch (e, st) {
-      logger.error('ポストファイルを読めません: $postPath', e, st);
-      if (ctx.mounted) await showMessageDialog(ctx, title: Strings.error, message: 'ポストファイルを読めません\n$e');
+      locked = await LockedPostFile.acquire(postPath);
+    } on PostFileException catch (e) {
+      logger.error('ポストファイルを開けません: $postPath / ${e.message}');
+      if (ctx.mounted) await showMessageDialog(ctx, title: Strings.error, message: e.message);
       return;
     }
+    try {
+      await _generateWith(locked.text, postPath);
+    } finally {
+      await locked.release();
+    }
+  }
+
+  Future<void> _generateWith(String script, String postPath) async {
+    final ctx = _ctx;
+    final logger = session.logger;
     final meta = parsePostMeta(script);
     final verr = checkPostApiVersion(meta);
     if (verr != null) {
       if (ctx.mounted) await showMessageDialog(ctx, title: Strings.error, message: verr);
       return;
     }
-    if (meta!.targetDb != model.properties.targetDb.wire && ctx.mounted) {
-      final go = await showConfirmDialog(ctx,
-          title: '対象DBの不一致',
-          message: 'ポストファイルの対象DB(${meta.targetDb})とモデルの対象DB(${model.properties.targetDb.wire})が異なります。続行しますか?',
-          yes: '続行',
-          no: '中止');
-      if (!go) return;
+    // どのデータベースを適用するかは、ポストファイルのメタ情報で決める。
+    final fileName = postPath.substring(postPath.lastIndexOf(Platform.pathSeparator) + 1);
+    final kind = PostFileInfo(path: postPath, fileName: fileName, meta: meta).kindOf(session.settings.postKinds);
+    if (kind == null) {
+      logger.error('ポストファイルの対象DB(${meta!.targetDb})は未対応です: $postPath');
+      if (ctx.mounted) {
+        await showMessageDialog(ctx,
+            title: Strings.error,
+            message: 'ポストファイルの対象DB(${meta.targetDb})は、アプリが扱うデータベースの種類ではありません。\n'
+                '設定の「ポストファイル > 種類(kind)の関連付け」で、既存の種類(${DbKind.values.map((k) => k.wire).join(' / ')})に関連付けてください。');
+      }
+      return;
     }
+    if (kind != session.model.properties.targetDb) {
+      final before = session.model.properties.targetDb.wire;
+      session.run(UpdateModelPropertiesCommand({'targetDb': kind.wire}));
+      session.notify('対象のデータベースをポストファイルに合わせて変更しました($before → ${kind.wire})');
+      logger.info('対象のデータベースをポストファイルに合わせて変更: $before → ${kind.wire}');
+    }
+    final model = session.model;
     // 生成前検証 → 生成
     final GenerationOutcome out;
     try {

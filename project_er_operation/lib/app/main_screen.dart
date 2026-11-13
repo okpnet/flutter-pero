@@ -28,6 +28,7 @@ class MainScreen extends StatefulWidget {
     required this.onSettingsApplied,
     this.initialFile,
     this.singleInstance,
+    this.destroyWindow,
   });
   final EditorSession session;
   final SettingsStore settingsStore;
@@ -36,6 +37,9 @@ class MainScreen extends StatefulWidget {
 
   /// 単一インスタンス(2つ目の起動から渡された引数を受け取る)。nullなら多重起動を許す。
   final SingleInstance? singleInstance;
+
+  /// ウィンドウを破棄する処理(終了時)。テストで差し替える。nullなら window_manager で破棄する。
+  final Future<void> Function()? destroyWindow;
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -91,8 +95,35 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     if (path != null && mounted) await actions.openPath(path);
   }
 
+  Future<void> _destroyWindow() async {
+    final custom = widget.destroyWindow;
+    if (custom != null) return custom();
+    await windowManager.setPreventClose(false);
+    await windowManager.destroy();
+  }
+
+  /// ポストファイルが1つも無いときは、警告して終了する。復元用のキャッシュは消さない(次の起動で復元できる)。
+  Future<bool> _checkPostFiles() async {
+    if (s.postCatalog.hasValid) return true;
+    final invalid = s.postCatalog.files;
+    final detail = invalid.isEmpty
+        ? ''
+        : '\n\n使えないポストファイル:\n${invalid.map((f) => '・${f.fileName}: ${f.problem ?? 'メタ情報がありません'}').join('\n')}';
+    s.logger.error('使えるポストファイルがありません: ${s.postFolderPath()}');
+    if (mounted) {
+      await showMessageDialog(context,
+          title: Strings.warning,
+          message: '使えるポストファイル(*.post)が見つかりません。\nフォルダ: ${s.postFolderPath()}$detail\n\n'
+              'ポストファイルを配置してから起動し直してください。アプリケーションを終了します。');
+    }
+    await widget.singleInstance?.close();
+    await _destroyWindow();
+    return false;
+  }
+
   /// 起動処理(9.2-4)。復元の可否が確定した後にキャッシュを削除し、セッションロックを作る。
   Future<void> _startup() async {
+    if (!await _checkPostFiles()) return;
     final cache = s.cache;
     if (cache.previousSessionCrashed) {
       final state = cache.read(corrupt: (e) => s.logger.error('キャッシュが破損しています: $e'));
@@ -226,23 +257,36 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
 
   final _searchController = TextEditingController();
 
+  /// 検索の3部品(入力欄、正規表現のトグル、範囲のプルダウン)で共通の高さ。
+  static const double _searchHeight = 32;
+
   Widget _topBar() {
     final q = s.searchQuery;
     final h = s.highlights;
     final theme = Theme.of(context);
+    final borderColor = theme.colorScheme.outline;
+    final radius = BorderRadius.circular(4);
+    OutlineInputBorder border(Color c, [double w = 1]) =>
+        OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: c, width: w));
     return SizedBox(
-      height: 40,
+      height: 44,
       child: Center(
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           SizedBox(
             width: 240,
-            height: 30,
+            height: _searchHeight,
             child: TextField(
               key: const ValueKey('searchField'),
               controller: _searchController,
+              // テーマの入力欄の余白に左右されないよう、高さいっぱいに広げて縦中央に置く。
+              expands: true,
+              maxLines: null,
+              minLines: null,
+              textAlignVertical: TextAlignVertical.center,
               style: const TextStyle(fontSize: 13),
               decoration: InputDecoration(
                 isDense: true,
+                filled: false,
                 hintText: Strings.searchHint,
                 prefixIcon: const Icon(Icons.search, size: 16),
                 prefixIconConstraints: const BoxConstraints(minWidth: 28),
@@ -257,7 +301,9 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
                       ),
                 suffixIconConstraints: const BoxConstraints(minWidth: 24),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                border: const OutlineInputBorder(),
+                border: border(borderColor),
+                enabledBorder: border(borderColor),
+                focusedBorder: border(theme.colorScheme.primary, 1.5),
               ),
               onChanged: (v) => s.searchQuery = q.copyWith(text: v),
             ),
@@ -267,32 +313,35 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
             message: Strings.searchRegex,
             child: InkWell(
               key: const ValueKey('searchRegex'),
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: radius,
               onTap: () => s.searchQuery = q.copyWith(regex: !q.regex),
               child: Container(
-                width: 30,
-                height: 30,
+                width: _searchHeight,
+                height: _searchHeight,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: q.regex ? theme.colorScheme.primary.withValues(alpha: 0.2) : null,
-                  border: Border.all(color: q.regex ? theme.colorScheme.primary : theme.dividerColor),
-                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: q.regex ? theme.colorScheme.primary : borderColor),
+                  borderRadius: radius,
                 ),
                 child: const Text('.*', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
               ),
             ),
           ),
           const SizedBox(width: 6),
-          SizedBox(
-            height: 30,
-            child: DropdownButton<SearchScope>(
-              key: const ValueKey('searchScope'),
-              value: q.scope,
-              underline: const SizedBox(),
-              isDense: true,
-              style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurface),
-              items: [for (final sc in SearchScope.values) DropdownMenuItem(value: sc, child: Text(sc.label))],
-              onChanged: (v) => s.searchQuery = q.copyWith(scope: v),
+          Container(
+            height: _searchHeight,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(border: Border.all(color: borderColor), borderRadius: radius),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<SearchScope>(
+                key: const ValueKey('searchScope'),
+                value: q.scope,
+                isDense: true,
+                style: TextStyle(fontSize: 13, color: theme.colorScheme.onSurface),
+                items: [for (final sc in SearchScope.values) DropdownMenuItem(value: sc, child: Text(sc.label))],
+                onChanged: (v) => s.searchQuery = q.copyWith(scope: v),
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -323,13 +372,43 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     return parts.join('+');
   }
 
+  /// サイドメニューの幅(3.3-3)。メニュー項目が折り返さずに1行で収まる幅。
+  static const double sideMenuWidth = 200;
+
+  /// ペインを開閉する(スライドイン/アウト)。開いた幅のまま描画し、はみ出す分を切り取る。
+  Widget _slidePane({required bool open, required double width, required AlignmentGeometry alignment, required Widget child}) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeInOut,
+      width: open ? width : 0,
+      child: ClipRect(
+        child: ExcludeFocus(
+          excluding: !open,
+          child: IgnorePointer(
+            ignoring: !open,
+            child: OverflowBox(
+              alignment: alignment,
+              minWidth: width,
+              maxWidth: width,
+              child: child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _body() {
     return LayoutBuilder(builder: (context, c) {
-      final rightMin = 240.0;
+      const rightMin = 240.0;
       var rightW = (c.maxWidth * s.settings.rightPaneRatio).clamp(rightMin, c.maxWidth * 0.6);
       return Row(children: [
-        _sideMenu(),
-        const VerticalDivider(width: 1),
+        _slidePane(
+          open: s.settings.sideMenuOpen,
+          width: sideMenuWidth + 1,
+          alignment: Alignment.centerLeft,
+          child: Row(children: [_sideMenu(), const VerticalDivider(width: 1)]),
+        ),
         Expanded(
           child: Column(children: [
             _tabBar(),
@@ -337,21 +416,37 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
             Expanded(child: DiagramCanvas(key: canvasKey, session: s, host: actions)),
           ]),
         ),
-        MouseRegion(
-          cursor: SystemMouseCursors.resizeColumn,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onHorizontalDragUpdate: (d) {
-              rightW = (rightW - d.delta.dx).clamp(rightMin, c.maxWidth * 0.6);
-              s.settings.rightPaneRatio = rightW / c.maxWidth;
-              setState(() {});
-            },
-            child: const SizedBox(width: 6, child: VerticalDivider(width: 6)),
-          ),
+        _slidePane(
+          open: s.settings.rightPaneOpen,
+          width: rightW + 6,
+          alignment: Alignment.centerRight,
+          child: Row(children: [
+            MouseRegion(
+              cursor: SystemMouseCursors.resizeColumn,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragUpdate: (d) {
+                  rightW = (rightW - d.delta.dx).clamp(rightMin, c.maxWidth * 0.6);
+                  s.settings.rightPaneRatio = rightW / c.maxWidth;
+                  setState(() {});
+                },
+                child: const SizedBox(width: 6, child: VerticalDivider(width: 6)),
+              ),
+            ),
+            SizedBox(width: rightW, child: _rightPane()),
+          ]),
         ),
-        SizedBox(width: rightW, child: _rightPane()),
       ]);
     });
+  }
+
+  void _togglePane({required bool side}) {
+    if (side) {
+      s.settings.sideMenuOpen = !s.settings.sideMenuOpen;
+    } else {
+      s.settings.rightPaneOpen = !s.settings.rightPaneOpen;
+    }
+    s.notify(null);
   }
 
   // ---- サイドメニュー(3.3): 機能別のタブ ----
@@ -367,7 +462,8 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     ];
     final theme = Theme.of(context);
     return SizedBox(
-      width: 160,
+      key: const ValueKey('sideMenu'),
+      width: sideMenuWidth,
       child: Column(children: [
         Row(children: [
           for (var i = 0; i < tabs.length; i++)
@@ -401,13 +497,20 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     );
   }
 
+  /// 折り返さずに1行で表示する。収まらないときは文字を縮小する。
+  Widget _oneLine(String text, TextStyle? style) => FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(text, style: style, maxLines: 1, softWrap: false),
+      );
+
   List<Widget> _sideTabItems() {
     Widget mi(String label, VoidCallback? onPressed, {SingleActivator? key}) => ListTile(
           dense: true,
           visualDensity: VisualDensity.compact,
           enabled: onPressed != null,
-          title: Text(label, style: const TextStyle(fontSize: 13)),
-          subtitle: key == null ? null : Text(_keyLabel(key), style: const TextStyle(fontSize: 10)),
+          title: _oneLine(label, const TextStyle(fontSize: 13)),
+          subtitle: key == null ? null : _oneLine(_keyLabel(key), const TextStyle(fontSize: 10)),
           onTap: onPressed,
         );
     const div = Divider(height: 1);
@@ -422,7 +525,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
               child: ListTile(
                 dense: true,
                 leading: Icon(icon, size: 20),
-                title: Text(label),
+                title: _oneLine(label, null),
                 onTap: onTap,
               ),
             );
@@ -444,7 +547,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
               key: const ValueKey('recentFiles'),
               dense: true,
               tilePadding: const EdgeInsets.symmetric(horizontal: 16),
-              title: const Text(Strings.fileRecent, style: TextStyle(fontSize: 13)),
+              title: _oneLine(Strings.fileRecent, const TextStyle(fontSize: 13)),
               children: [
                 for (final p in recent)
                   ListTile(
@@ -506,6 +609,12 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     return SizedBox(
       height: 36,
       child: Row(children: [
+        IconButton(
+          key: const ValueKey('toggleSideMenu'),
+          tooltip: s.settings.sideMenuOpen ? Strings.hideSideMenu : Strings.showSideMenu,
+          icon: Icon(s.settings.sideMenuOpen ? Icons.menu_open : Icons.menu, size: 18),
+          onPressed: () => _togglePane(side: true),
+        ),
         Expanded(
           child: ReorderableListView(
             scrollDirection: Axis.horizontal,
@@ -522,6 +631,12 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
           ),
         ),
         IconButton(tooltip: Strings.opAddDiagram, icon: const Icon(Icons.add, size: 18), onPressed: actions.addDiagram),
+        IconButton(
+          key: const ValueKey('toggleRightPane'),
+          tooltip: s.settings.rightPaneOpen ? Strings.hideRightPane : Strings.showRightPane,
+          icon: Icon(s.settings.rightPaneOpen ? Icons.vertical_split : Icons.vertical_split_outlined, size: 18),
+          onPressed: () => _togglePane(side: false),
+        ),
       ]),
     );
   }

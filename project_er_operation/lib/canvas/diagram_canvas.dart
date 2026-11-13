@@ -40,7 +40,18 @@ class DiagramCanvas extends StatefulWidget {
 enum _Mode { none, pan, drag, marquee, column }
 
 class DiagramCanvasState extends State<DiagramCanvas> {
+  @override
+  void initState() {
+    super.initState();
+    s.viewTick.addListener(_onViewChanged);
+  }
+
+  void _onViewChanged() {
+    if (mounted) setState(() {});
+  }
+
   final TextCache _text = TextCache();
+  final EntityPictureCache _pictures = EntityPictureCache();
   final FocusNode _focus = FocusNode();
 
 
@@ -67,6 +78,8 @@ class DiagramCanvasState extends State<DiagramCanvas> {
 
   @override
   void dispose() {
+    s.viewTick.removeListener(_onViewChanged);
+    _pictures.clear();
     _focus.dispose();
 
     super.dispose();
@@ -412,6 +425,8 @@ class DiagramCanvasState extends State<DiagramCanvas> {
                   offset: Offset(v.scrollX, v.scrollY),
                   fontFamily: s.settings.fontFamily.isEmpty ? null : s.settings.fontFamily,
                   highlights: s.highlights,
+                  pictureCache: _pictures,
+                  cacheKey: (s.layoutGeneration, brightness, s.settings.fontFamily),
                 ),
               ),
             ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../common/common.dart';
 import '../model/model.dart';
 
 /// ダイアログ内の単純な文字列入力(入力のたびに作業コピーへ反映する)。
@@ -48,13 +49,13 @@ class PerDbTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: DbKind.values.length,
+      length: DbKindFilter.visible.length,
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        TabBar(tabs: [for (final d in DbKind.values) Tab(text: d.wire)]),
+        TabBar(tabs: [for (final d in DbKindFilter.visible) Tab(text: d.wire)]),
         SizedBox(
           height: height,
           child: TabBarView(children: [
-            for (final d in DbKind.values)
+            for (final d in DbKindFilter.visible)
               ListView(padding: const EdgeInsets.only(top: 6), children: [
                 for (final e in entries)
                   textField(e.$1, e.$2[d] ?? '', (v) => e.$2[d] = v,

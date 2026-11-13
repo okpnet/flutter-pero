@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../generation/generation.dart';
 import '../logging/logging.dart';
 import '../model/model.dart';
 import '../persistence/persistence.dart';
@@ -8,7 +9,7 @@ import '../persistence/persistence.dart';
 const int settingsVersion = 1;
 
 /// 色テーマ(10.2)。
-enum ThemeChoice { system, dark, light }
+enum ThemeChoice { system, dark, light, user }
 
 /// アプリの設定(10.2)。自動保存の項目(分割割合、ウィンドウ、フォルダ、最近使ったファイル)を含む。
 class AppSettings {
@@ -25,6 +26,12 @@ class AppSettings {
   String postFolder = '';
   String postFile = 'postgresql.post';
   int postTimeoutSeconds = 30;
+
+  /// ポストファイルの種類(kind)の関連付け(ファイル名 → kind)。メタ情報の targetDb が既存のkindでない
+  /// ユーザー作成のポストファイルを、既存のkindとして扱う(例: mariadb.post=mysql)。
+  String postKindsText = '';
+
+  Map<String, DbKind> get postKinds => parseKindAssociations(postKindsText);
   // 生成
   String generatedExtension = 'sql';
   bool crlf = true;
@@ -40,6 +47,9 @@ class AppSettings {
   int undoLimit = 100;
   // 表示
   ThemeChoice theme = ThemeChoice.system;
+
+  /// ユーザーテーマ(theme_lib のテーマJSON)のファイル。色テーマが「ユーザーテーマ」のときに使う。
+  String userThemeFile = '';
   bool headerLogical = true;
   bool headerPhysical = true;
   bool colLogical = true;
@@ -62,6 +72,8 @@ class AppSettings {
   // 自動保存の項目
   double rightPaneRatio = 0.25;
   double propsRatio = 0.5;
+  bool sideMenuOpen = true;
+  bool rightPaneOpen = true;
   double? windowX, windowY, windowWidth, windowHeight;
   bool windowMaximized = false;
   String lastFolder = '';
@@ -94,7 +106,12 @@ class AppSettings {
           'retentionDays': backupRetentionDays,
         },
         'file': {'recentFileCount': recentFileCount},
-        'post': {'folder': postFolder, 'file': postFile, 'timeoutSeconds': postTimeoutSeconds},
+        'post': {
+          'folder': postFolder,
+          'file': postFile,
+          'timeoutSeconds': postTimeoutSeconds,
+          'kinds': postKindsText,
+        },
         'generation': {
           'extension': generatedExtension,
           'crlf': crlf,
@@ -112,6 +129,7 @@ class AppSettings {
         },
         'display': {
           'theme': theme.name,
+          'userThemeFile': userThemeFile,
           'headerLogical': headerLogical,
           'headerPhysical': headerPhysical,
           'colLogical': colLogical,
@@ -133,6 +151,8 @@ class AppSettings {
         'auto': {
           'rightPaneRatio': rightPaneRatio,
           'propsRatio': propsRatio,
+          'sideMenuOpen': sideMenuOpen,
+          'rightPaneOpen': rightPaneOpen,
           'windowX': windowX,
           'windowY': windowY,
           'windowWidth': windowWidth,
@@ -171,6 +191,7 @@ class AppSettings {
     s.postFolder = str(po, 'folder', s.postFolder);
     s.postFile = str(po, 'file', s.postFile);
     s.postTimeoutSeconds = i(po, 'timeoutSeconds', s.postTimeoutSeconds, 1, 300);
+    s.postKindsText = str(po, 'kinds', s.postKindsText);
     final g = sec('generation');
     s.generatedExtension = str(g, 'extension', s.generatedExtension);
     s.crlf = b(g, 'crlf', s.crlf);
@@ -186,6 +207,7 @@ class AppSettings {
     s.undoLimit = i(c, 'undoLimit', s.undoLimit, 10, 1000);
     final d = sec('display');
     s.theme = ThemeChoice.values.where((e) => e.name == d['theme']).firstOrNull ?? s.theme;
+    s.userThemeFile = str(d, 'userThemeFile', s.userThemeFile);
     s.headerLogical = b(d, 'headerLogical', s.headerLogical);
     s.headerPhysical = b(d, 'headerPhysical', s.headerPhysical);
     if (!s.headerLogical && !s.headerPhysical) s.headerLogical = s.headerPhysical = true;
@@ -219,6 +241,8 @@ class AppSettings {
     final a = sec('auto');
     s.rightPaneRatio = f(a, 'rightPaneRatio', s.rightPaneRatio, 0.1, 0.6);
     s.propsRatio = f(a, 'propsRatio', s.propsRatio, 0.1, 0.9);
+    s.sideMenuOpen = b(a, 'sideMenuOpen', s.sideMenuOpen);
+    s.rightPaneOpen = b(a, 'rightPaneOpen', s.rightPaneOpen);
     double? nd(String k) => a[k] is num ? (a[k] as num).toDouble() : null;
     s.windowX = nd('windowX');
     s.windowY = nd('windowY');

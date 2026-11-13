@@ -108,4 +108,34 @@ void main() {
     expect(text, contains('[ERROR] [persistence] 壊れた'));
     expect(text, isNot(contains('出ない')));
   });
+
+  test('ユーザーテーマ、ポストファイルの種類の関連付け、ペインの開閉は保存・復元される。既定は仕様どおり', () {
+    final d = AppSettings();
+    expect((d.sideMenuOpen, d.rightPaneOpen), (true, true));
+    expect((d.userThemeFile, d.postKindsText, d.theme), ('', '', ThemeChoice.system));
+    final s = AppSettings()
+      ..theme = ThemeChoice.user
+      ..userThemeFile = r'C:\themes\sunset.json'
+      ..postKindsText = 'mariadb.post=mysql, oracle.post=postgresql'
+      ..sideMenuOpen = false
+      ..rightPaneOpen = false;
+    expect(store().save(s), isNull);
+    final (r, notice) = store().load();
+    expect(notice, isNull);
+    expect(r.theme, ThemeChoice.user);
+    expect(r.userThemeFile, r'C:\themes\sunset.json');
+    expect(r.postKinds, {'mariadb.post': DbKind.mysql, 'oracle.post': DbKind.postgresql});
+    expect((r.sideMenuOpen, r.rightPaneOpen), (false, false));
+    expect(r.toJson(), s.toJson());
+  });
+
+  test('不正な値(型違い)は既定値のまま', () {
+    final r = AppSettings.fromJson({
+      'display': {'theme': 'rainbow', 'userThemeFile': 5},
+      'post': {'kinds': 7},
+      'auto': {'sideMenuOpen': 'yes', 'rightPaneOpen': 1},
+    });
+    expect((r.theme, r.userThemeFile, r.postKindsText), (ThemeChoice.system, '', ''));
+    expect((r.sideMenuOpen, r.rightPaneOpen), (true, true));
+  });
 }

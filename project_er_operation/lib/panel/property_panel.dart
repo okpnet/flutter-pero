@@ -233,10 +233,34 @@ class _ModelProps extends StatelessWidget {
             label: '対象のデータベース',
             value: p.targetDb,
             items: [
-              for (final k in DbKind.values)
+              for (final k in DbKindFilter.visible)
                 DropdownMenuItem(value: k, child: Text(k.wire)),
             ],
-            onChanged: (v) => v == null ? null : upd({'targetDb': v.wire}),
+            onChanged: (v) {
+              if (v == null) return;
+              // 現在のポストファイルがその種類でなければ、その種類のポストファイルへ切り替える。
+              final assoc = session.settings.postKinds;
+              final cur = session.postCatalog.byPath(p.postPath);
+              final candidates = session.postCatalog.forKind(v, assoc);
+              final switchPost = candidates.isNotEmpty && (cur == null || cur.kindOf(assoc) != v);
+              upd({'targetDb': v.wire, if (switchPost) 'postPath': candidates.first.path});
+            },
+          ),
+          _gap(),
+          _dropdown<String>(
+            key: ValueKey('postPick${p.postPath}'),
+            label: 'ポストファイル(一覧から選択。対象DBはメタ情報で決まる)',
+            value: session.postCatalog.byPath(p.postPath)?.path,
+            items: [
+              for (final f in session.postCatalog.valid)
+                DropdownMenuItem(value: f.path, child: Text(f.label, overflow: TextOverflow.ellipsis)),
+            ],
+            onChanged: (path) {
+              final f = path == null ? null : session.postCatalog.byPath(path);
+              final kind = f?.kindOf(session.settings.postKinds);
+              if (f == null || kind == null) return;
+              upd({'postPath': f.path, 'targetDb': kind.wire});
+            },
           ),
           _gap(),
           CommitTextField(

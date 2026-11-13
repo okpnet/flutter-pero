@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:theme_lib/theme_lib.dart';
 import 'package:window_manager/legacy.dart';
 
 import '../common/common.dart';
@@ -15,6 +16,7 @@ import '../session/session.dart';
 import '../settings/settings.dart';
 import 'main_screen.dart';
 import 'single_instance.dart';
+import 'theme_binder.dart';
 
 /// アプリのバージョン。
 const String appVersion = '0.1.0';
@@ -35,7 +37,11 @@ Future<void> startApp(List<String> args) async {
   final (settings, settingsNotice) = store.load();
 
   final sink = LogSink(LogSink.defaultDir(), level: settings.logLevel, retentionDays: settings.logRetentionDays);
-  final container = ProviderContainer(overrides: [logSinkProvider.overrideWithValue(sink)]);
+  // 共通ライブラリ(theme_lib)のログを、アプリのログ(機能名 theme)へつなぐ。
+  final container = ProviderContainer(overrides: [
+    logSinkProvider.overrideWithValue(sink),
+    themeLoggerProvider.overrideWithValue(ThemeLoggerAdapter(AppLogger(sink, 'theme'))),
+  ]);
   final logger = container.read(loggerProvider('app'));
   FlutterError.onError = (d) {
     logger.error('Flutterの例外: ${d.exceptionAsString()}', d.exception, d.stack);
@@ -49,6 +55,7 @@ Future<void> startApp(List<String> args) async {
 
   final cache = CacheStore(appDir);
   final session = EditorSession(settings: settings, logger: container.read(loggerProvider('session')), cache: cache);
+  session.rescanPosts();
   if (settingsNotice != null) {
     logger.warn(settingsNotice);
     session.statusMessage = settingsNotice;
@@ -83,7 +90,7 @@ Future<void> startApp(List<String> args) async {
   ));
 }
 
-class PeroApp extends StatefulWidget {
+class PeroApp extends ConsumerStatefulWidget {
   const PeroApp({super.key, required this.session, required this.store, this.initialFile, this.singleInstance});
   final EditorSession session;
   final SettingsStore store;
@@ -91,11 +98,29 @@ class PeroApp extends StatefulWidget {
   final SingleInstance? singleInstance;
 
   @override
-  State<PeroApp> createState() => _PeroAppState();
+  ConsumerState<PeroApp> createState() => _PeroAppState();
 }
 
-class _PeroAppState extends State<PeroApp> {
+class _PeroAppState extends ConsumerState<PeroApp> {
   late AppSettings _settings = widget.session.settings;
+  late final ThemeBinder _themeBinder = ThemeBinder(ref.read(themeManagerProvider.notifier));
+
+  @override
+  void initState() {
+    super.initState();
+    // 起動時の設定を反映する(ビルド中にプロバイダを変更しないよう、最初のフレームの後で行う)。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final err = _applyTheme();
+      if (err != null) widget.session.notify(err);
+    });
+  }
+
+  /// 色テーマを反映する。失敗したときは理由を返す(ログにも記録する)。
+  String? _applyTheme() {
+    final err = _themeBinder.apply(_settings);
+    if (err != null) widget.session.logger.warn(err);
+    return err;
+  }
 
   void _applied(AppSettings s) {
     final sess = widget.session;
@@ -106,31 +131,33 @@ class _PeroAppState extends State<PeroApp> {
       ..retentionDays = s.logRetentionDays;
     sess.startBackupTimer();
     setState(() => _settings = s);
-    sess.notify(null);
+    sess.rescanPosts();
+    String? notice;
+    if (!sess.postCatalog.hasValid) {
+      notice = '使えるポストファイルがありません: ${sess.postFolderPath()}';
+      sess.logger.warn(notice);
+    }
+    sess.notify(_applyTheme() ?? notice);
   }
 
-  ThemeMode get _mode => switch (_settings.theme) {
-        ThemeChoice.system => ThemeMode.system,
-        ThemeChoice.dark => ThemeMode.dark,
-        ThemeChoice.light => ThemeMode.light,
-      };
-
-  ThemeData _theme(Brightness b) => ThemeData(
-        colorSchemeSeed: const Color(0xFF1F4E79),
-        brightness: b,
-        useMaterial3: true,
-        fontFamily: _settings.fontFamily.isEmpty ? null : _settings.fontFamily,
-        visualDensity: VisualDensity.compact,
-      );
+  /// theme_lib のテーマに、アプリ固有の設定(フォント、コンパクトな密度)を重ねる。
+  ThemeData _themed(ThemeData base) {
+    final family = _settings.fontFamily;
+    return base.copyWith(
+      visualDensity: VisualDensity.compact,
+      textTheme: family.isEmpty ? null : base.textTheme.apply(fontFamily: family),
+      primaryTextTheme: family.isEmpty ? null : base.primaryTextTheme.apply(fontFamily: family),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: Strings.appName,
       debugShowCheckedModeBanner: false,
-      themeMode: _mode,
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
+      themeMode: ref.watch(themeModeProvider),
+      theme: _themed(ref.watch(lightThemeProvider)),
+      darkTheme: _themed(ref.watch(darkThemeProvider)),
       home: MainScreen(
         session: widget.session,
         settingsStore: widget.store,

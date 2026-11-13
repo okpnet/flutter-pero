@@ -41,6 +41,10 @@ dependencies:
   flutter_js: ^0.8.7
   pdf: ^3.13.1
   file_selector: ^1.1.0
+  logger_provider:
+    path: ../../flutter-pms/packages/infra/logger_provider
+  theme_lib:
+    path: ../../flutter-pms/packages/ui/theme_lib
 
 dev_dependencies:
   flutter_test:

@@ -102,6 +102,7 @@ class _TriggerCardState extends State<_TriggerCard> {
   @override
   Widget build(BuildContext context) {
     final g = widget.trigger;
+    if (!DbKindFilter.visible.contains(_bodyDb)) _bodyDb = DbKindFilter.visible.first;
     final m = widget.session.model;
     final name = m.triggerName(widget.table, g);
     final en = widget.enabled;
@@ -148,7 +149,7 @@ class _TriggerCardState extends State<_TriggerCard> {
               initialValue: _bodyDb,
               isExpanded: true,
               decoration: _deco('本体を入力する対象DB'),
-              items: [for (final d in DbKind.values) DropdownMenuItem(value: d, child: Text(d.wire))],
+              items: [for (final d in DbKindFilter.visible) DropdownMenuItem(value: d, child: Text(d.wire))],
               onChanged: (v) => setState(() => _bodyDb = v ?? _bodyDb),
             ),
             const SizedBox(height: 16),

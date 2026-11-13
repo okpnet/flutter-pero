@@ -349,6 +349,21 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.1"
+  logger:
+    dependency: transitive
+    description:
+      name: logger
+      sha256: "2a0dc097e7b01d942475bdd552356db2d0f768b05540bd4b2b53f1840f2239a7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.8.0"
+  logger_provider:
+    dependency: "direct main"
+    description:
+      path: "../../flutter-pms/packages/infra/logger_provider"
+      relative: true
+    source: path
+    version: "0.0.1"
   logging:
     dependency: transitive
     description:
@@ -433,10 +448,10 @@ packages:
     dependency: "direct main"
     description:
       name: path_provider
-      sha256: "3087813781ab814e4157b172f1a11c46be20179fcc9bea043e0fba36bc0acaa2"
+      sha256: a7f4874f987173da295a61c181b8ee71dab59b332a486b391babf26a1b884825
       url: "https://pub.dev"
     source: hosted
-    version: "2.0.15"
+    version: "2.1.6"
   path_provider_android:
     dependency: transitive
     description:
@@ -557,6 +572,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.5.0"
+  rotation_log:
+    dependency: transitive
+    description:
+      name: rotation_log
+      sha256: "1452932a76a6bcc0fac05d21468fdae88a095cc84a62bc6eff27204eaecef77b"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.2"
   sky_engine:
     dependency: transitive
     description: flutter
@@ -626,6 +649,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.12"
+  theme_lib:
+    dependency: "direct main"
+    description:
+      path: "../../flutter-pms/packages/ui/theme_lib"
+      relative: true
+    source: path
+    version: "0.1.0"
   typed_data:
     dependency: transitive
     description:

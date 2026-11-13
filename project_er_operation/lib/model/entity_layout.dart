@@ -97,13 +97,36 @@ class EntityLayouter {
     return e is ViewEntity ? 'VIEW $base' : base;
   }
 
-  /// 描画する列行。ビューの列行はPK等のマークを持たない。
-  List<EntityRow> rowsOf(Entity e) {
+  // ---- メモ化(1つのインスタンスは、モデルが変わらない間だけ使う) ----
+  final Map<int, List<EntityRow>> _rows = {};
+  final Map<int, List<double>> _widths = {};
+  final Map<int, (double, double)> _sizes = {};
+  final Map<int, (double, double)> _sizesCollapsed = {};
+  Map<int, Set<int>>? _fkColumnsByChild;
+
+  Set<int> _fkColumnIds(int childId) {
+    final map = _fkColumnsByChild ??= () {
+      final m = <int, Set<int>>{};
+      for (final r in model.relationships) {
+        final s = m.putIfAbsent(r.childId, () => <int>{});
+        for (final p in r.columnPairs) {
+          s.add(p.childColumnId);
+        }
+      }
+      return m;
+    }();
+    return map[childId] ?? const <int>{};
+  }
+
+  /// 描画する列行(メモ化)。ビューの列行はPK等のマークを持たない。
+  List<EntityRow> rowsOf(Entity e) => _rows[e.id] ??= _buildRows(e);
+
+  /// 項目ごとの最大幅(メモ化)。
+  List<double> widthsOf(Entity e) => _widths[e.id] ??= columnWidths(rowsOf(e));
+
+  List<EntityRow> _buildRows(Entity e) {
     if (e is TableEntity) {
-      final fkIds = <int>{
-        for (final r in model.relationships.where((r) => r.childId == e.id))
-          for (final p in r.columnPairs) p.childColumnId
-      };
+      final fkIds = _fkColumnIds(e.id);
       return [
         for (final x in model.expand(e).columns)
           EntityRow(
@@ -195,10 +218,13 @@ class EntityLayouter {
   static const double itemGap = 8;
 
   /// (幅, 高さ)。[collapsed] のときヘッダのみ。
-  (double, double) sizeOf(Entity e, {bool collapsed = false}) {
+  (double, double) sizeOf(Entity e, {bool collapsed = false}) =>
+      (collapsed ? _sizesCollapsed : _sizes)[e.id] ??= _computeSize(e, collapsed);
+
+  (double, double) _computeSize(Entity e, bool collapsed) {
     final rows = rowsOf(e);
     final headerW = textWidth(headerText(e), options.headerScale) + iconWidth * 2;
-    final widths = columnWidths(rows);
+    final widths = widthsOf(e);
     var rowW = iconWidth * 3; // PK, NotNull, デフォルトありのアイコン
     for (final w in widths) {
       if (w > 0) rowW += w + itemGap;

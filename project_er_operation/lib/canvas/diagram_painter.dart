@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -28,7 +29,51 @@ class TextCache {
     return _map[key] = tp;
   }
 
+  /// アイコン(フォントのグリフ)用。レイアウト済みのものを再利用する。
+  TextPainter glyph(IconData icon, double size, Color color) {
+    final key = 'glyph|${icon.fontFamily}|${icon.codePoint}|$size|${color.toARGB32()}';
+    final hit = _map[key];
+    if (hit != null) return hit;
+    final tp = TextPainter(
+      text: TextSpan(
+          text: String.fromCharCode(icon.codePoint),
+          style: TextStyle(fontFamily: icon.fontFamily, fontSize: size, color: color)),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return _map[key] = tp;
+  }
+
   void clear() => _map.clear();
+}
+
+/// エンティティ1つ分の描画結果(Picture)のキャッシュ(バッファリング。2-15)。
+/// モデル・表示設定・テーマが変わると [validate] で破棄する。ドラッグ中は、同じPictureを位置だけ変えて描く。
+class EntityPictureCache {
+  final Map<(int, bool), ui.Picture> _pictures = {};
+  Object? _key;
+
+  /// [key] が前回と違うときは、保持している描画結果をすべて破棄する。
+  void validate(Object key) {
+    if (_key == key) return;
+    clear();
+    _key = key;
+  }
+
+  ui.Picture? get(int entityId, bool collapsed) => _pictures[(entityId, collapsed)];
+
+  void put(int entityId, bool collapsed, ui.Picture p) {
+    if (_pictures.length > 800) clear();
+    _pictures[(entityId, collapsed)] = p;
+  }
+
+  int get length => _pictures.length;
+
+  void clear() {
+    for (final p in _pictures.values) {
+      p.dispose();
+    }
+    _pictures.clear();
+  }
 }
 
 /// 列のドラッグ中の表示(リレーションシップ構築。モデル座標)。
@@ -67,8 +112,17 @@ class DiagramPainter extends CustomPainter {
     this.fontFamily,
     this.clipRect,
     this.highlights = SearchHighlights.none,
+    this.pictureCache,
+    this.cacheKey,
     super.repaint,
   });
+
+  /// エンティティの描画結果のキャッシュ(画面表示のみ。画像出力では使わない)。[cacheKey] が変わると破棄する。
+  final EntityPictureCache? pictureCache;
+  final Object? cacheKey;
+
+  /// これより小さい倍率では、列行を省略して見出しだけを描く(読めない大きさの文字を描かない)。
+  static const double detailScale = 0.4;
 
   /// 検索のヒット(3.9)。画像出力には含めない。
   final SearchHighlights highlights;
@@ -133,7 +187,7 @@ class DiagramPainter extends CustomPainter {
       // ドラッグ中のエンティティは半透明で、ポインタの位置に表示する(ドラッグ元には何も描かない)。
       final dragging = positionOverride.containsKey(e.id) && !forExport;
       if (dragging) canvas.saveLayer(r.inflate(6), Paint()..color = const Color(0x99FFFFFF));
-      _paintEntity(canvas, e, r, p.collapsed, selection.contains(e.id) && !forExport);
+      _drawEntity(canvas, e, r, p.collapsed, selection.contains(e.id) && !forExport);
       if (!forExport) _paintHighlight(canvas, e, r, p.collapsed);
       if (dragging) canvas.restore();
     }
@@ -288,13 +342,7 @@ class DiagramPainter extends CustomPainter {
   }
 
   void _lockIcon(Canvas canvas, Offset at) {
-    final tp = TextPainter(
-      text: TextSpan(
-          text: String.fromCharCode(Icons.lock.codePoint),
-          style: TextStyle(
-              fontFamily: Icons.lock.fontFamily, fontSize: 12, color: colors.relationshipLine)),
-      textDirection: TextDirection.ltr,
-    )..layout();
+    final tp = textCache.glyph(Icons.lock, 12, colors.relationshipLine);
     canvas.drawRect(Rect.fromCenter(center: at, width: 16, height: 16),
         Paint()..color = colors.background);
     tp.paint(canvas, at - Offset(tp.width / 2, tp.height / 2));
@@ -304,7 +352,37 @@ class DiagramPainter extends CustomPainter {
 
   static const double collapseButtonWidth = 18;
 
-  void _paintEntity(Canvas canvas, Entity e, Rect r, bool collapsed, bool selected) {
+  /// エンティティを描く。画面表示ではキャッシュしたPictureを位置だけ変えて再生する。
+  void _drawEntity(Canvas canvas, Entity e, Rect r, bool collapsed, bool selected) {
+    final lod = !forExport && scale < detailScale;
+    final cache = pictureCache;
+    if (forExport || cache == null || lod) {
+      _paintEntity(canvas, e, r, collapsed, selected, simple: lod);
+      return;
+    }
+    cache.validate(cacheKey ?? 0);
+    var pic = cache.get(e.id, collapsed);
+    if (pic == null) {
+      final rec = ui.PictureRecorder();
+      _paintEntity(ui.Canvas(rec), e, Rect.fromLTWH(0, 0, r.width, r.height), collapsed, false);
+      pic = rec.endRecording();
+      cache.put(e.id, collapsed, pic);
+    }
+    canvas.save();
+    canvas.translate(r.left, r.top);
+    canvas.drawPicture(pic);
+    canvas.restore();
+    if (selected) {
+      canvas.drawRect(
+          r,
+          Paint()
+            ..color = colors.selection
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.5);
+    }
+  }
+
+  void _paintEntity(Canvas canvas, Entity e, Rect r, bool collapsed, bool selected, {bool simple = false}) {
     final o = layouter.options;
     final isView = e is ViewEntity;
     final fs = o.fontSize;
@@ -321,18 +399,13 @@ class DiagramPainter extends CustomPainter {
     final btn = textCache.get(collapsed ? '▶' : '▼', fs, colors.headerText, family: fontFamily);
     btn.paint(canvas, Offset(r.right - collapseButtonWidth + 2, r.top + (headerH - btn.height) / 2));
     if (e.locked) {
-      final lock = TextPainter(
-        text: TextSpan(
-            text: String.fromCharCode(Icons.lock.codePoint),
-            style: TextStyle(fontFamily: Icons.lock.fontFamily, fontSize: fs, color: colors.headerText)),
-        textDirection: TextDirection.ltr,
-      )..layout();
+      final lock = textCache.glyph(Icons.lock, fs, colors.headerText);
       lock.paint(canvas, Offset(r.right - collapseButtonWidth - 16, r.top + (headerH - lock.height) / 2));
     }
 
-    if (!collapsed) {
+    if (!collapsed && !simple) {
       final rows = layouter.rowsOf(e);
-      final widths = layouter.columnWidths(rows);
+      final widths = layouter.widthsOf(e);
       final rh = layouter.rowHeight;
       var y = r.top + headerH;
       for (final row in rows) {
@@ -414,12 +487,7 @@ class DiagramPainter extends CustomPainter {
   }
 
   void _glyph(Canvas canvas, IconData icon, Offset center, double size, Color color) {
-    final tp = TextPainter(
-      text: TextSpan(
-          text: String.fromCharCode(icon.codePoint),
-          style: TextStyle(fontFamily: icon.fontFamily, fontSize: size, color: color)),
-      textDirection: TextDirection.ltr,
-    )..layout();
+    final tp = textCache.glyph(icon, size, color);
     tp.paint(canvas, Offset(center.dx, center.dy - tp.height / 2));
   }
 
