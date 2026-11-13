@@ -36,6 +36,7 @@ class Strings {
   static const hideRightPane = 'プロパティを隠す';
   static const showRightPane = 'プロパティを表示';
   static String loadingFile(String name) => '$name を読み込み中…';
+  static const generating = '生成しています…';
   static const generateCanceled = '生成ファイルの保存を中止しました';
   static const autoLayoutNothing = '自動配置の対象がありません';
   static const autoLayoutFailed = '自動配置に失敗しました';

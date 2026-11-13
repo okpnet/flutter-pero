@@ -585,7 +585,36 @@ class EditorActions implements CanvasHost {
 
   // ---- RUN(4.3) ----
 
+  /// 生成実行(RUN)。生成の間は、オーバーレイとローディングで操作できなくし(二重の実行とロックの衝突を防ぐ)、
+  /// 保存ダイアログが閉じる、または生成が終わったら外す。結果やエラーのダイアログを出す前にも外す。
   Future<void> generate() async {
+    if (session.busyMessage.value != null) return;
+    session.busyMessage.value = Strings.generating;
+    try {
+      await _generateFlow();
+    } finally {
+      session.busyMessage.value = null;
+    }
+  }
+
+  void _idle() => session.busyMessage.value = null;
+
+  Future<void> _idleMessage(BuildContext c, {required String title, required String message, String? detail}) {
+    _idle();
+    return showMessageDialog(c, title: title, message: message, detail: detail);
+  }
+
+  Future<void> _idleValidation(BuildContext c, List<ValidationIssue> errors, List<ValidationIssue> warnings) {
+    _idle();
+    return showValidationErrors(c, errors, warnings);
+  }
+
+  Future<void> _idleResult(BuildContext c, {required String path, required List<ValidationIssue> warnings}) {
+    _idle();
+    return showGenerationResult(c, path: path, warnings: warnings);
+  }
+
+  Future<void> _generateFlow() async {
     final ctx = _ctx;
     final logger = session.logger;
     // ポストファイルの確認(9.6-1-2)。パスが空のときは、ポストフォルダの一覧から、モデルの対象DBの
@@ -615,7 +644,7 @@ class EditorActions implements CanvasHost {
       locked = await LockedPostFile.acquire(postPath);
     } on PostFileException catch (e) {
       logger.error('ポストファイルを開けません: $postPath / ${e.message}');
-      if (ctx.mounted) await showMessageDialog(ctx, title: Strings.error, message: e.message);
+      if (ctx.mounted) await _idleMessage(ctx, title: Strings.error, message: e.message);
       return;
     }
     try {
@@ -631,7 +660,7 @@ class EditorActions implements CanvasHost {
     final meta = parsePostMeta(script);
     final verr = checkPostApiVersion(meta);
     if (verr != null) {
-      if (ctx.mounted) await showMessageDialog(ctx, title: Strings.error, message: verr);
+      if (ctx.mounted) await _idleMessage(ctx, title: Strings.error, message: verr);
       return;
     }
     // どのデータベースを適用するかは、ポストファイルのメタ情報で決める。
@@ -640,7 +669,7 @@ class EditorActions implements CanvasHost {
     if (kind == null) {
       logger.error('ポストファイルの対象DB(${meta!.targetDb})は未対応です: $postPath');
       if (ctx.mounted) {
-        await showMessageDialog(ctx,
+        await _idleMessage(ctx,
             title: Strings.error,
             message: 'ポストファイルの対象DB(${meta.targetDb})は、アプリが扱うデータベースの種類ではありません。\n'
                 '設定の「ポストファイル > 種類(kind)の関連付け」で、既存の種類(${DbKind.values.map((k) => k.wire).join(' / ')})に関連付けてください。');
@@ -669,12 +698,12 @@ class EditorActions implements CanvasHost {
     } on PostException catch (e) {
       logger.error('ポストファイルの実行に失敗: ${e.message}\n${e.stack ?? ''}');
       if (ctx.mounted) {
-        await showMessageDialog(ctx, title: Strings.error, message: e.message, detail: e.stack);
+        await _idleMessage(ctx, title: Strings.error, message: e.message, detail: e.stack);
       }
       return;
     }
     if (!out.isOk) {
-      if (ctx.mounted) await showValidationErrors(ctx, out.errors, out.warnings);
+      if (ctx.mounted) await _idleValidation(ctx, out.errors, out.warnings);
       return;
     }
     // 出力先は、保存ダイアログで選ぶ。既定のフォルダ・ファイル名は、モデルの出力設定(9.6-1-5)から決める。
@@ -697,7 +726,7 @@ class EditorActions implements CanvasHost {
       );
     } on FileSystemException catch (e, st) {
       logger.error('生成ファイルの書込みに失敗: $path', e, st);
-      if (ctx.mounted) await showMessageDialog(ctx, title: Strings.error, message: '書込みに失敗しました: ${e.message}');
+      if (ctx.mounted) await _idleMessage(ctx, title: Strings.error, message: '書込みに失敗しました: ${e.message}');
       return;
     }
     if (saved == null) {
@@ -705,7 +734,7 @@ class EditorActions implements CanvasHost {
       return;
     }
     logger.info('生成しました: $saved (警告${out.warnings.length}件)');
-    if (ctx.mounted) await showGenerationResult(ctx, path: saved, warnings: out.warnings);
+    if (ctx.mounted) await _idleResult(ctx, path: saved, warnings: out.warnings);
   }
 
   Future<void> exportJson() async {

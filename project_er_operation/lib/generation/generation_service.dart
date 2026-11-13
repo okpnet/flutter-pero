@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../model/model.dart';
@@ -31,12 +32,33 @@ class GenerationService {
     bool dropBeforeCreate = false,
     void Function(String)? onLog,
   }) async {
-    final v = ModelValidator(model, nameFormat: nameFormat, pkNaming: pkNaming).validate();
-    if (v.hasErrors) return GenerationOutcome.invalid(v.errors, v.warnings);
-    final json = GenerationJsonBuilder(model, pkNaming: pkNaming, dropBeforeCreate: dropBeforeCreate).buildText();
-    final text = await runner.run(script: postScript, jsonText: json, timeout: timeout, onLog: onLog);
-    return GenerationOutcome.ok(text, v.warnings);
+    // 検証と生成用JSONの作成は、大きなモデルでは時間がかかるため、別Isolateで行う(画面を止めない)。
+    // モデルなどを別Isolateへ渡せないときは、このIsolateで行う。
+    PreparedGeneration prep;
+    try {
+      prep = await Isolate.run(() => prepareGeneration(model, nameFormat, pkNaming, dropBeforeCreate));
+    } on Object {
+      prep = prepareGeneration(model, nameFormat, pkNaming, dropBeforeCreate);
+    }
+    if (prep.jsonText == null) return GenerationOutcome.invalid(prep.errors, prep.warnings);
+    final text = await runner.run(script: postScript, jsonText: prep.jsonText!, timeout: timeout, onLog: onLog);
+    return GenerationOutcome.ok(text, prep.warnings);
   }
+}
+
+/// 生成前検証(9.5)と、生成用JSONの作成の結果。エラーがあるときは [jsonText] がnull。
+class PreparedGeneration {
+  PreparedGeneration(this.errors, this.warnings, this.jsonText);
+  final List<ValidationIssue> errors;
+  final List<ValidationIssue> warnings;
+  final String? jsonText;
+}
+
+PreparedGeneration prepareGeneration(ErModel model, String nameFormat, PkNaming pkNaming, bool dropBeforeCreate) {
+  final v = ModelValidator(model, nameFormat: nameFormat, pkNaming: pkNaming).validate();
+  if (v.hasErrors) return PreparedGeneration(v.errors, v.warnings, null);
+  final json = GenerationJsonBuilder(model, pkNaming: pkNaming, dropBeforeCreate: dropBeforeCreate).buildText();
+  return PreparedGeneration(const [], v.warnings, json);
 }
 
 /// 出力先のパス(9.6-1の5)。

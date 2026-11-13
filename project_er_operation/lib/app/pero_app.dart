@@ -19,7 +19,7 @@ import 'single_instance.dart';
 import 'theme_binder.dart';
 
 /// アプリのバージョン。
-const String appVersion = '0.1.0';
+const String appVersion = '0.2.0';
 
 /// 起動処理: 設定の読込、ウィンドウの初期化、セッションの生成。
 Future<void> startApp(List<String> args) async {

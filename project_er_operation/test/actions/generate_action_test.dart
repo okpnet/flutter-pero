@@ -18,8 +18,11 @@ import '../support/session_support.dart';
 
 /// ファイルダイアログの代わり。保存は、既定のフォルダ・ファイル名でそのまま保存する(キャンセルする設定もできる)。
 class FakeFileDialogs extends FileDialogs {
-  FakeFileDialogs({this.cancelSave = false});
+  FakeFileDialogs({this.cancelSave = false, this.onSave});
   final bool cancelSave;
+
+  /// 保存ダイアログが開いている間に呼ばれる。
+  final void Function()? onSave;
   int openCalls = 0;
   final saves = <({String title, String fileName, String? dir, String extension})>[];
 
@@ -38,6 +41,7 @@ class FakeFileDialogs extends FileDialogs {
     String? initialDirectory,
   }) async {
     saves.add((title: title, fileName: fileName, dir: initialDirectory, extension: extension));
+    onSave?.call();
     if (cancelSave) return null;
     final path = '${initialDirectory!}${Platform.pathSeparator}$fileName';
     File(path).writeAsBytesSync(bytes);
@@ -103,7 +107,7 @@ void main() {
 
   /// 生成を実行し、ダイアログ(結果またはエラー)が出たら本文を読んで閉じる。本文を返す。
   /// ポストファイルの実行は別Isolateで行うため、実際の非同期(runAsync)の中で進める。
-  Future<String> runGenerate(WidgetTester tester, EditorActions actions) async {
+  Future<String> runGenerate(WidgetTester tester, EditorActions actions, {void Function()? onDialog}) async {
     var text = '';
     await tester.runAsync(() async {
       var finished = false;
@@ -113,6 +117,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 50));
         await tester.pump();
         if (find.byType(AlertDialog).evaluate().isNotEmpty) {
+          onDialog?.call();
           text = tester.widgetList<Text>(find.descendant(of: find.byType(AlertDialog), matching: find.byType(Text))).map((t) => t.data ?? '').join('\n') +
               tester.widgetList<SelectableText>(find.descendant(of: find.byType(AlertDialog), matching: find.byType(SelectableText))).map((t) => t.data ?? '').join('\n');
           await tester.tap(find.text(Strings.close));
@@ -236,5 +241,60 @@ void main() {
     r.session.settings.generatedExtension = '.TXT';
     await runGenerate(tester, r.actions);
     expect(r.dialogs.saves.single.fileName, 'out.txt');
+  });
+
+  testWidgets('生成の間は、オーバーレイ(busyMessage)を表示し、保存ダイアログが閉じたら外す。結果のダイアログの前には外れている', (tester) async {
+    File(p('postgresql.post')).writeAsStringSync(pgScript);
+    final seen = <String?>[];
+    late FakeFileDialogs fake;
+    String? busyDuringSave;
+    fake = FakeFileDialogs(onSave: () => busyDuringSave = seen.isEmpty ? null : seen.last);
+    final r = await setup(tester, postPath: p('postgresql.post'), dialogs: fake);
+    r.session.busyMessage.addListener(() => seen.add(r.session.busyMessage.value));
+    String? busyAtResult;
+    await runGenerate(tester, r.actions, onDialog: () => busyAtResult = r.session.busyMessage.value);
+    expect(seen, [Strings.generating, null]);
+    expect(busyDuringSave, Strings.generating, reason: '保存ダイアログが開いている間は、まだ操作できない');
+    expect(busyAtResult, isNull, reason: '結果のダイアログを出す前に外す');
+  });
+
+  testWidgets('保存ダイアログをキャンセルしたときも、オーバーレイは外れる', (tester) async {
+    File(p('postgresql.post')).writeAsStringSync(pgScript);
+    final r = await setup(tester, postPath: p('postgresql.post'), dialogs: FakeFileDialogs(cancelSave: true));
+    await runGenerate(tester, r.actions);
+    expect(r.session.busyMessage.value, isNull);
+  });
+
+  testWidgets('エラー(ポストファイルがない)のときも、エラーのダイアログの前にオーバーレイは外れる', (tester) async {
+    final r = await setup(tester, postPath: p('missing.post'));
+    String? busyAtDialog = 'unset';
+    await runGenerate(tester, r.actions, onDialog: () => busyAtDialog = r.session.busyMessage.value);
+    expect(busyAtDialog, isNull);
+    expect(r.session.busyMessage.value, isNull);
+  });
+
+  testWidgets('生成中にもう一度実行しても、二重には生成しない(ポストファイルのロックの衝突も起きない)', (tester) async {
+    File(p('postgresql.post')).writeAsStringSync(pgScript);
+    final r = await setup(tester, postPath: p('postgresql.post'));
+    await tester.runAsync(() async {
+      var finished = false;
+      final first = r.actions.generate().whenComplete(() => finished = true);
+      // 1回目が動いている間の、2回目(ボタンの再クリック、F5の連打)は、何もせずに戻る
+      await r.actions.generate();
+      await r.actions.generate();
+      final deadline = DateTime.now().add(const Duration(seconds: 25));
+      while (!finished && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await tester.pump();
+        if (find.text(Strings.close).evaluate().isNotEmpty) {
+          expect(find.textContaining('ロック'), findsNothing);
+          await tester.tap(find.text(Strings.close));
+          await tester.pump();
+        }
+      }
+      await first.timeout(const Duration(seconds: 5));
+    });
+    expect(r.dialogs.saves.length, 1);
+    expect(r.session.busyMessage.value, isNull);
   });
 }

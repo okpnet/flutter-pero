@@ -3,7 +3,7 @@
 ; ビルド: inno\build_installer.ps1(ISCC /DAppVersion=x.y.z で版を渡す)
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.2.0"
 #endif
 #define AppName "PERO"
 #define AppExe "project_er_operation.exe"
