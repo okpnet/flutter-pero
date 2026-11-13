@@ -63,6 +63,8 @@ class Strings {
   static const sideTabAdd = '追加';
   static const searchHint = '検索';
   static const searchRegex = '正規表現';
+  static const searchPrev = '前のヒットへ(Shift+Enter)';
+  static const searchNext = '次のヒットへ(Enter)';
   static const searchHitCount = '件ヒット';
   static const searchInvalidRegex = '正規表現が不正です';
 

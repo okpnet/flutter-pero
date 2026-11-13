@@ -12,6 +12,7 @@ class MethodDef {
     Map<DbKind, String>? bodies,
     this.comment = '',
     this.args = '',
+    this.schema = '',
     List<int>? dependsOnTableIds,
   })  : dependsOnTableIds = dependsOnTableIds ?? [],
         call = call ?? {for (final d in DbKind.values) d: ''},
@@ -29,6 +30,9 @@ class MethodDef {
 
   /// 引数の定義(`COMMENT ON FUNCTION 名前(引数)` の括弧の内側。ファンクションのみ。8.1-3)。
   String args;
+
+  /// スキーマ。空のときはモデルのスキーマ。トリガー・関数ビューからの呼出しと `COMMENT ON FUNCTION` で使う。外部定義には付けない(8.1-3)。
+  String schema;
 
   /// 依存するテーブルのID。これらの作成後に定義を出力する(8.1-3)。
   List<int> dependsOnTableIds;
@@ -48,6 +52,7 @@ class MethodDef {
       bodies: Map.of(bodies),
       comment: comment,
       args: args,
+      schema: schema,
       dependsOnTableIds: List.of(dependsOnTableIds));
 }
 

@@ -4,13 +4,19 @@ CREATE SCHEMA IF NOT EXISTS app;
 
 CREATE SCHEMA IF NOT EXISTS other;
 
-DROP TYPE IF EXISTS status_t CASCADE;
+CREATE SCHEMA IF NOT EXISTS types;
 
-CREATE TYPE status_t AS ENUM ('open', 'it''s closed');
+CREATE SCHEMA IF NOT EXISTS fn;
 
-DROP TYPE IF EXISTS point_t CASCADE;
+DROP TYPE IF EXISTS app.status_t CASCADE;
 
-CREATE TYPE point_t AS (x integer, label varchar(20));
+CREATE TYPE app.status_t AS ENUM ('open', 'it''s closed');
+
+COMMENT ON TYPE app.status_t IS '状態''s';
+
+DROP TYPE IF EXISTS types.point_t CASCADE;
+
+CREATE TYPE types.point_t AS (x integer, label varchar(20));
 
 DROP TABLE IF EXISTS app.node CASCADE;
 
@@ -20,7 +26,7 @@ CREATE TABLE app.node (
   name varchar(20) DEFAULT '',
   qty numeric(18,2),
   due date DEFAULT CURRENT_DATE + 30,
-  state status_t,
+  state app.status_t,
   CONSTRAINT p_node_key PRIMARY KEY (id),
   CONSTRAINT node_ck1 CHECK (qty >= 0),
   CONSTRAINT node_state_ck CHECK (state <> 'closed' OR qty = 0)
@@ -30,7 +36,7 @@ ALTER TABLE app.node ADD CONSTRAINT node_uq UNIQUE NULLS NOT DISTINCT (name, qty
 
 CREATE FUNCTION count_nodes() RETURNS bigint AS $$ SELECT count(*) FROM node $$ LANGUAGE sql;
 
-COMMENT ON FUNCTION count_nodes() IS 'ノード数';
+COMMENT ON FUNCTION app.count_nodes() IS 'ノード数';
 
 DROP TABLE IF EXISTS other.other CASCADE;
 
@@ -55,6 +61,6 @@ CREATE FUNCTION view_rows() RETURNS bigint AS $$ SELECT count(*) FROM app.v_node
 
 CREATE FUNCTION touch() RETURNS trigger AS $$ BEGIN RETURN NEW; END $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION touch() IS '更新日時を設定する';
+COMMENT ON FUNCTION fn.touch() IS '更新日時を設定する';
 
-CREATE TRIGGER node_trg01 BEFORE INSERT OR UPDATE OF name, qty ON app.node FOR EACH ROW EXECUTE FUNCTION touch('80', 1);
+CREATE TRIGGER node_trg01 BEFORE INSERT OR UPDATE OF name, qty ON app.node FOR EACH ROW EXECUTE FUNCTION fn.touch('80', 1);

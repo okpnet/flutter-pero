@@ -218,6 +218,10 @@ class _MethodDialogState extends State<_MethodDialog> {
                         key: ValueKey('mc${cur.id}'), multiline: true),
                     textField('引数の定義(COMMENT ON FUNCTION 名前(引数) の括弧の内側)', cur.args, (v) => cur.args = v,
                         key: ValueKey('ma${cur.id}')),
+                    if (!cur.external)
+                      textField('スキーマ(空でモデルのスキーマ。トリガー・関数ビューからの呼出しに使う)', cur.schema,
+                          (v) => cur.schema = v,
+                          key: ValueKey('ms${cur.id}')),
                     if (cur.kind == MethodKind.function && !cur.external) _dependsOn(cur),
                     const SizedBox(height: 4),
                     Text(cur.kind == MethodKind.function ? '対象DBごとの呼出し式・本体' : '対象DBごとのトリガー本体'),

@@ -1,6 +1,6 @@
-// @post name=MySQL targetDb=mysql apiVersion=2
+// @post name=MySQL targetDb=mysql apiVersion=3
 //
-// PERO 同梱のポストファイル(MySQL 8.0用)。生成用JSON(apiVersion 2)からSQLを作る。
+// PERO 同梱のポストファイル(MySQL 8.0用)。生成用JSON(apiVersion 3)からSQLを作る。
 // 出力順: 開始クエリ → スキーマ(CREATE DATABASE) → ファンクション → テーブル(依存するファンクションを直後に)
 //         → 外部キー → ビュー → トリガー → 終了クエリ
 //

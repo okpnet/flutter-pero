@@ -7,6 +7,7 @@ import 'package:project_er_operation/app/main_screen.dart';
 import 'package:project_er_operation/canvas/canvas.dart';
 import 'package:project_er_operation/common/common.dart';
 import 'package:project_er_operation/generation/generation.dart';
+import 'package:project_er_operation/model/model.dart' hide Orientation;
 import 'package:project_er_operation/session/session.dart';
 import 'package:project_er_operation/settings/settings.dart';
 import 'package:theme_lib/theme_lib.dart';
@@ -60,6 +61,50 @@ void main() {
     await tester.pump();
     return s;
   }
+
+  testWidgets('ダイアグラムの切替ショートカット: Ctrl+Tab / Ctrl+Shift+Tab(循環)、Ctrl+1〜9(4.5)', (tester) async {
+    final s = await pump(tester);
+    s.model.diagrams.add(Diagram(id: s.model.allocateId(), name: '2'));
+    s.model.diagrams.add(Diagram(id: s.model.allocateId(), name: '3'));
+    s.notify(null);
+    await tester.pump();
+    final ids = s.model.diagrams.map((d) => d.id).toList();
+    expect(s.diagram.id, ids[0]);
+    Future<void> key(LogicalKeyboardKey k, {bool shift = false}) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(k);
+      if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+    }
+
+    await key(LogicalKeyboardKey.tab);
+    expect(s.diagram.id, ids[1]);
+    await key(LogicalKeyboardKey.tab, shift: true);
+    await key(LogicalKeyboardKey.tab, shift: true);
+    expect(s.diagram.id, ids.last); // 先頭から前へ循環
+    await key(LogicalKeyboardKey.digit2);
+    expect(s.diagram.id, ids[1]);
+    await key(LogicalKeyboardKey.digit9); // 範囲外
+    expect(s.diagram.id, ids[1]);
+  });
+
+  testWidgets('検索ボックスの↑↓ボタンで、ヒットしたオブジェクトへ移動する(循環)', (tester) async {
+    final s = await pump(tester);
+    expect(tester.widget<IconButton>(find.byKey(const ValueKey('searchNext'))).onPressed, isNull); // ヒットなし
+    await tester.enterText(find.byKey(const ValueKey('searchField')), 'orders');
+    await tester.pump();
+    final targets = s.highlights.targets;
+    expect(targets, isNotEmpty);
+    await tester.tap(find.byKey(const ValueKey('searchNext')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('searchPrev')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('searchPrev')));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('検索の入力欄、正規表現のトグル、範囲のプルダウンは同じ高さ', (tester) async {
     await pump(tester);

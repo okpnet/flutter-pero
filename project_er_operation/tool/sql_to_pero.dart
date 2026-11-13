@@ -407,10 +407,7 @@ class Importer {
         return TypeSpec('boolean');
       case 'varchar':
       case 'character varying':
-        if (a == null) {
-          f.add('長さなしの varchar', '$raw → text');
-          return TypeSpec('text');
-        }
+        if (a == null) return TypeSpec('varchar_nolen'); // 長さなし(6.3)
         return TypeSpec('varchar', length: a);
       case 'char':
       case 'character':
@@ -995,6 +992,10 @@ class Importer {
           if (fn == null) continue;
           fn.comment = text;
           fn.args = open < 0 ? '' : target.substring(open + 1, target.lastIndexOf(')'));
+        case 'type':
+          final t = userTypes[identParts(target).last];
+          if (t == null) continue;
+          t.comment = text;
         default:
           _skip('COMMENT ON ${kind.toUpperCase()}(置き場がない)', target);
       }

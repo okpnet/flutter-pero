@@ -69,11 +69,48 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     windowManager.addListener(this);
     _externalSub = widget.singleInstance?.messages.listen(_onExternalArgs);
     windowManager.setPreventClose(true);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _startup());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      canvasKey.currentState?.columnDragPointer.addListener(_onColumnDragPointer);
+      _startup();
+    });
+  }
+
+  // ---- 列ドラッグ中のタブ切替(3.4-9) ----
+
+  final Map<int, GlobalKey> _tabKeys = {};
+  Timer? _tabHoverTimer;
+  int? _hoverTabId;
+
+  /// ポインタ(画面座標)の下にあるダイアグラムのタブのID。
+  int? _tabAt(Offset p) {
+    for (final e in _tabKeys.entries) {
+      final box = e.value.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached) continue;
+      final r = box.localToGlobal(Offset.zero) & box.size;
+      if (r.contains(p)) return e.key;
+    }
+    return null;
+  }
+
+  void _onColumnDragPointer() {
+    final p = canvasKey.currentState?.columnDragPointer.value;
+    final id = p == null ? null : _tabAt(p);
+    final target = id == s.diagram.id ? null : id; // 表示中のタブは対象外
+    if (target == _hoverTabId) return;
+    _tabHoverTimer?.cancel();
+    setState(() => _hoverTabId = target);
+    if (target == null) return;
+    _tabHoverTimer = Timer(const Duration(milliseconds: 600), () {
+      if (!mounted) return;
+      s.currentDiagramId = target;
+      setState(() => _hoverTabId = null);
+    });
   }
 
   @override
   void dispose() {
+    _tabHoverTimer?.cancel();
+    canvasKey.currentState?.columnDragPointer.removeListener(_onColumnDragPointer);
     _externalSub?.cancel();
     windowManager.removeListener(this);
     nameFocus.dispose();
@@ -219,6 +256,11 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
             const SingleActivator(LogicalKeyboardKey.f5): actions.generate,
             const SingleActivator(LogicalKeyboardKey.comma, control: true): actions.openSettings,
             const SingleActivator(LogicalKeyboardKey.digit0, control: true): () => canvasKey.currentState?.resetZoom(),
+            const SingleActivator(LogicalKeyboardKey.tab, control: true): () => s.cycleDiagram(1),
+            const SingleActivator(LogicalKeyboardKey.tab, control: true, shift: true): () => s.cycleDiagram(-1),
+            for (var n = 1; n <= 9; n++)
+              SingleActivator(LogicalKeyboardKey(LogicalKeyboardKey.digit1.keyId + n - 1), control: true):
+                  () => s.selectDiagramAt(n - 1),
           },
           child: Focus(
             autofocus: true,
@@ -286,6 +328,13 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
 
   final _searchController = TextEditingController();
 
+  /// ヒットしたオブジェクトへ移動する(3.9-16)。ダイアグラムの切替後に、画面の中央へスクロールする。
+  void _moveSearch(int delta) {
+    final id = s.moveSearch(delta);
+    if (id == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => canvasKey.currentState?.revealEntity(id));
+  }
+
   /// 検索の3部品(入力欄、正規表現のトグル、範囲のプルダウン)で共通の高さ。
   static const double _searchHeight = 32;
 
@@ -335,6 +384,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
                 focusedBorder: border(theme.colorScheme.primary, 1.5),
               ),
               onChanged: (v) => s.searchQuery = q.copyWith(text: v),
+              onSubmitted: (_) => _moveSearch(HardwareKeyboard.instance.isShiftPressed ? -1 : 1),
             ),
           ),
           const SizedBox(width: 6),
@@ -380,6 +430,20 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
               key: const ValueKey('searchStatus'),
               style: TextStyle(fontSize: 12, color: h.invalidRegex ? Colors.red : theme.hintColor),
             ),
+          IconButton(
+            key: const ValueKey('searchPrev'),
+            tooltip: Strings.searchPrev,
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.keyboard_arrow_up, size: 20),
+            onPressed: h.targets.isEmpty ? null : () => _moveSearch(-1),
+          ),
+          IconButton(
+            key: const ValueKey('searchNext'),
+            tooltip: Strings.searchNext,
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.keyboard_arrow_down, size: 20),
+            onPressed: h.targets.isEmpty ? null : () => _moveSearch(1),
+          ),
         ]),
       ),
     );
@@ -673,13 +737,19 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
   Widget _tab(Diagram d) {
     final selected = d.id == s.diagram.id;
     final theme = Theme.of(context);
+    final hover = d.id == _hoverTabId; // 列ドラッグ中に、ここへ切り替わる
     return GestureDetector(
+      key: _tabKeys.putIfAbsent(d.id, GlobalKey.new),
       onTap: () => s.currentDiagramId = d.id,
       onDoubleTap: () => actions.renameDiagram(d.id),
       child: Container(
         padding: const EdgeInsets.only(left: 12, right: 4),
         decoration: BoxDecoration(
-          color: selected ? theme.colorScheme.primary.withValues(alpha: 0.15) : null,
+          color: hover
+              ? theme.colorScheme.tertiary.withValues(alpha: 0.35)
+              : selected
+                  ? theme.colorScheme.primary.withValues(alpha: 0.15)
+                  : null,
           border: Border(bottom: BorderSide(color: selected ? theme.colorScheme.primary : Colors.transparent, width: 2)),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [

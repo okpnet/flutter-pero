@@ -720,7 +720,7 @@ class EditorActions implements CanvasHost {
       saved = await dialogs.saveBytes(
         title: Strings.runGenerate,
         fileName: path.substring(sepAt + 1),
-        bytes: generatedFileBytes(out.text!, crlf: session.settings.crlf),
+        bytes: generatedFileBytes(out.text!, crlf: session.settings.crlf, db: model.properties.targetDb),
         extension: session.settings.outputExtension,
         initialDirectory: Directory(dir).existsSync() ? dir : null,
       );

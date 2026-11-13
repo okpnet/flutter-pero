@@ -193,12 +193,14 @@ ErModel modelNewFeatures() {
     DataType(
         id: 'custom_1',
         displayName: 'status_t',
+        comment: "状態's",
         physical: {DbKind.postgresql: 'status_t'},
         kind: TypeKind.enumeration,
         enumValues: ['open', "it's closed"]),
     DataType(
         id: 'custom_2',
         displayName: 'point_t',
+        schema: 'types',
         physical: {DbKind.postgresql: 'point_t'},
         kind: TypeKind.composite,
         fields: [TypeField(name: 'x', typeId: 'integer'), TypeField(name: 'label', typeId: 'varchar', length: 20)]),
@@ -208,6 +210,7 @@ ErModel modelNewFeatures() {
       id: m.allocateId(),
       kind: MethodKind.trigger,
       name: 'touch',
+      schema: 'fn',
       comment: '更新日時を設定する',
       bodies: {for (final d in DbKind.values) d: d == DbKind.postgresql ? 'CREATE FUNCTION touch() RETURNS trigger AS \$\$ BEGIN RETURN NEW; END \$\$ LANGUAGE plpgsql' : ''});
   final count = MethodDef(

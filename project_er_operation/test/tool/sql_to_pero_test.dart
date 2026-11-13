@@ -30,6 +30,7 @@ alter table tests.node add constraint node_IX1 unique nulls not distinct (name, 
 alter table tests.node add constraint node_CK1 check (qty >= 0);
 alter table tests.node add constraint node_FK1 foreign key (parent_id) references tests.node (node_id) DEFERRABLE INITIALLY DEFERRED;
 CREATE TRIGGER trg_node BEFORE INSERT OR UPDATE OF name, qty ON tests.node FOR EACH ROW EXECUTE FUNCTION tests.touch('80');
+comment on type tests.pt is '点の型';
 comment on table tests.node is 'ノード';
 comment on column tests.node.name is '名前';
 comment on function tests.count_nodes() is '件数';
@@ -82,6 +83,8 @@ void main() {
     final pt = m.types.firstWhere((x) => x.displayName == 'pt');
     expect(pt.kind, TypeKind.composite);
     expect(pt.fields.map((f) => f.name), ['x', 'label']);
+    expect(pt.fields.last.typeId, 'varchar_nolen'); // 長さなしの varchar
+    expect(pt.comment, '点の型');
     expect(m.tables.single.columns.last.typeId, mood.id);
   });
 

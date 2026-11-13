@@ -62,7 +62,7 @@ class ErModel {
   ErModel({
     required this.id,
     this.nextId = 1,
-    this.appVersion = '0.2.0',
+    this.appVersion = '0.3.0',
     ModelProperties? properties,
     List<DataType>? types,
     List<MethodDef>? methods,
@@ -94,6 +94,18 @@ class ErModel {
         id: m.allocateId(), name: 'ダイアグラム1', pageSize: pageSize, orientation: orientation));
     m.methods.add(standardEmptyStringMethod(m.allocateId()));
     return m;
+  }
+
+  /// ユーザー定義型の出力スキーマ(6.3-8)。出力にスキーマを含めない設定のときは空。
+  String schemaOfType(DataType t) {
+    if (!properties.includeSchema) return '';
+    return t.schema.isNotEmpty ? t.schema : properties.schema;
+  }
+
+  /// メソッドの出力スキーマ(8.1-3)。出力にスキーマを含めない設定、外部定義のときは空。
+  String schemaOfMethod(MethodDef m) {
+    if (!properties.includeSchema || m.external) return '';
+    return m.schema.isNotEmpty ? m.schema : properties.schema;
   }
 
   /// エンティティの出力スキーマ(5.2-1)。出力にスキーマを含めない設定のときは空。

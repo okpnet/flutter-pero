@@ -3,7 +3,7 @@ import 'dart:convert';
 import '../model/model.dart';
 
 /// 現行のフォーマットバージョン。
-const int currentFormatVersion = 2;
+const int currentFormatVersion = 3;
 
 /// `.pero` の保存形式(付録A)。スキーマを明示的に定義した実装(11.4)。
 /// キーの順は付録Aのとおり。
@@ -66,6 +66,8 @@ class PeroEncoder {
             }
         ],
         'enumValues': t.enumValues,
+        'comment': t.comment,
+        'schema': t.schema,
       };
 
   static Map<String, Object?> methodToMap(MethodDef x) => {
@@ -78,6 +80,7 @@ class PeroEncoder {
         'comment': x.comment,
         'args': x.args,
         'dependsOnTableIds': x.dependsOnTableIds,
+        'schema': x.schema,
       };
 
   static Map<String, Object?> columnToMap(ColumnDef c, {required bool withPk}) => {

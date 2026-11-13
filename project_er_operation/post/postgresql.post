@@ -1,6 +1,6 @@
-// @post name=PostgreSQL targetDb=postgresql apiVersion=2
+// @post name=PostgreSQL targetDb=postgresql apiVersion=3
 //
-// PERO 同梱のポストファイル(PostgreSQL用)。生成用JSON(apiVersion 2)からSQLを作る。
+// PERO 同梱のポストファイル(PostgreSQL用)。生成用JSON(apiVersion 3)からSQLを作る。
 // 出力順: 開始クエリ → スキーマ → ユーザー定義型 → ファンクション → テーブル(依存するファンクションを直後に)
 //         → 外部キー → ビュー → トリガー → 終了クエリ
 //
@@ -55,7 +55,7 @@ function main(jsonText) {
   function emitFunction(f) {
     push(endSemi(f.body));
     if (f.comment) {
-      push('COMMENT ON FUNCTION ' + f.name + '(' + f.args + ') IS ' + lit(f.comment) + ';');
+      push('COMMENT ON FUNCTION ' + qt(f.schema, f.name) + '(' + f.args + ') IS ' + lit(f.comment) + ';');
     }
   }
 
@@ -67,12 +67,14 @@ function main(jsonText) {
 
   // 3. ユーザー定義型(複合型、列挙型)
   m.userTypes.forEach(function (t) {
-    if (drop) push('DROP TYPE IF EXISTS ' + q(t.name) + ' CASCADE;');
+    var tn = qt(t.schema, t.name);
+    if (drop) push('DROP TYPE IF EXISTS ' + tn + ' CASCADE;');
     if (t.kind === 'composite') {
-      push('CREATE TYPE ' + q(t.name) + ' AS (' + t.fields.map(function (f) { return q(f.name) + ' ' + f.type; }).join(', ') + ');');
+      push('CREATE TYPE ' + tn + ' AS (' + t.fields.map(function (f) { return q(f.name) + ' ' + f.type; }).join(', ') + ');');
     } else {
-      push('CREATE TYPE ' + q(t.name) + ' AS ENUM (' + t.values.map(lit).join(', ') + ');');
+      push('CREATE TYPE ' + tn + ' AS ENUM (' + t.values.map(lit).join(', ') + ');');
     }
+    if (t.comment) push('COMMENT ON TYPE ' + tn + ' IS ' + lit(t.comment) + ';');
   });
 
   // 4. ファンクション(定義の本体があり、外部定義でないもの。依存テーブルのあるものはテーブルの後)
@@ -141,7 +143,7 @@ function main(jsonText) {
     if (v.viewType === 'sql') {
       body = String(v.sql).replace(/[\s;]+$/, '');
     } else if (v.viewType === 'function') {
-      body = 'SELECT * FROM ' + v.function.name + '(' + v.function.args.join(', ') + ')';
+      body = 'SELECT * FROM ' + (v.function.schema ? v.function.schema + '.' : '') + v.function.name + '(' + v.function.args.join(', ') + ')';
     } else {
       body = 'SELECT ' + v.columns.map(function (c) { return qualified(c.expr) + ' AS ' + q(c.name); }).join(', ') +
         '\nFROM ' + qt(v.from.schema, v.from.table) + ' ' + q(v.from.alias);
@@ -171,7 +173,7 @@ function main(jsonText) {
           emitted[fn] = true;
           var f = methodByName[fn];
           push(endSemi(g.body));
-          if (f && f.comment) push('COMMENT ON FUNCTION ' + fn + '(' + f.args + ') IS ' + lit(f.comment) + ';');
+          if (f && f.comment) push('COMMENT ON FUNCTION ' + qt(f.schema, fn) + '(' + f.args + ') IS ' + lit(f.comment) + ';');
         }
       } else {
         push(endSemi(g.body));
@@ -182,7 +184,7 @@ function main(jsonText) {
       var s = 'CREATE TRIGGER ' + q(g.name) + ' ' + g.timing + ' ' + events.join(' OR ') +
         ' ON ' + qt(t.schema, t.physicalName) + ' FOR EACH ' + g.forEach;
       if (g.when) s += ' WHEN (' + g.when + ')';
-      push(s + ' EXECUTE FUNCTION ' + q(fn) + '(' + g.args + ');');
+      push(s + ' EXECUTE FUNCTION ' + (g.methodName !== null ? qt(g.methodSchema, fn) : q(fn)) + '(' + g.args + ');');
     });
   });
 

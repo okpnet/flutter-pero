@@ -1,6 +1,6 @@
-// @post name=SQL Server targetDb=sqlserver apiVersion=2
+// @post name=SQL Server targetDb=sqlserver apiVersion=3
 //
-// PERO 同梱のポストファイル(SQL Server 2016 SP1以降のT-SQL用)。生成用JSON(apiVersion 2)からSQLを作る。
+// PERO 同梱のポストファイル(SQL Server 2016 SP1以降のT-SQL用)。生成用JSON(apiVersion 3)からSQLを作る。
 // 出力順: 開始クエリ → スキーマ → ファンクション → テーブル(依存するファンクションを直後に)
 //         → 外部キー → ビュー → トリガー → 終了クエリ
 //

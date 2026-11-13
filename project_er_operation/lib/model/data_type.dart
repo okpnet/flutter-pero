@@ -34,6 +34,8 @@ class DataType {
     this.kind = TypeKind.scalar,
     List<TypeField>? fields,
     List<String>? enumValues,
+    this.comment = '',
+    this.schema = '',
   })  : physical = physical ?? {},
         fields = fields ?? [],
         enumValues = enumValues ?? [];
@@ -63,6 +65,12 @@ class DataType {
 
   bool get isUserDefined => kind != TypeKind.scalar;
 
+  /// コメント(ユーザー定義型。`COMMENT ON TYPE` で出力する。6.3-8)。
+  String comment;
+
+  /// ユーザー定義型のスキーマ。空のときはモデルのスキーマ(6.3-8)。
+  String schema;
+
   DataType copy() => DataType(
         id: id,
         displayName: displayName,
@@ -76,6 +84,8 @@ class DataType {
         kind: kind,
         fields: fields.map((f) => f.copy()).toList(),
         enumValues: List.of(enumValues),
+        comment: comment,
+        schema: schema,
       );
 
   /// テンプレートをパラメータ展開した物理型名。テンプレート未定義はnull。
@@ -140,6 +150,7 @@ List<DataType> standardTypes() {
         kind: ParamKind.length, length: 1),
     _t('varchar', 'varchar(n)', s, 'varchar({length})', 'VARCHAR({length})', 'varchar({length})', 'TEXT',
         kind: ParamKind.length, length: 255),
+    _t('varchar_nolen', 'varchar(長さなし)', s, 'varchar', 'TEXT', 'varchar(max)', 'TEXT'),
     _t('text', 'text', s, 'text', 'TEXT', 'varchar(max)', 'TEXT'),
     _t('date', 'date', d, 'date', 'DATE', 'date', 'TEXT'),
     _t('time', 'time', d, 'time', 'TIME', 'time', 'TEXT'),

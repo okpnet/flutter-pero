@@ -62,7 +62,50 @@ class EditorSession extends ChangeNotifier {
   set searchQuery(SearchQuery q) {
     if (q == _searchQuery) return;
     _searchQuery = q;
+    _searchCursor = null;
     notifyListeners();
+  }
+
+  int? _searchCursor;
+
+  /// ヒットしたエンティティへ移動する(3.9-16)。[delta] が正なら次、負なら前(循環)。
+  /// どのダイアグラムにも配置されていないエンティティは飛ばす。現在のダイアグラムに配置されていなければ、
+  /// 配置している最初のダイアグラム(タブ順)へ切り替える。移動先のIDを返す(ヒットがないときはnull)。
+  int? moveSearch(int delta) {
+    final ids = [
+      for (final id in highlights.targets)
+        if (model.diagrams.any((d) => d.placementOf(id) != null)) id
+    ];
+    if (ids.isEmpty) return null;
+    final cur = _searchCursor;
+    int next;
+    if (cur == null) {
+      next = delta >= 0 ? ids.first : ids.last;
+    } else if (delta >= 0) {
+      next = ids.firstWhere((id) => id > cur, orElse: () => ids.first);
+    } else {
+      next = ids.lastWhere((id) => id < cur, orElse: () => ids.last);
+    }
+    _searchCursor = next;
+    if (diagram.placementOf(next) == null) {
+      _currentDiagramId = model.diagrams.firstWhere((d) => d.placementOf(next) != null).id;
+      selection.clear();
+    }
+    notifyListeners();
+    return next;
+  }
+
+  /// ダイアグラムを順に切り替える(循環。4.5)。
+  void cycleDiagram(int delta) {
+    final list = model.diagrams;
+    final i = list.indexWhere((d) => d.id == diagram.id);
+    currentDiagramId = list[(i + delta) % list.length].id;
+  }
+
+  /// n番目(0始まり)のダイアグラムへ切り替える。範囲外は何もしない(4.5)。
+  void selectDiagramAt(int index) {
+    if (index < 0 || index >= model.diagrams.length) return;
+    currentDiagramId = model.diagrams[index].id;
   }
 
   /// 検索のヒット。条件とモデルが変わったときだけ再計算する。

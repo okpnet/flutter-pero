@@ -84,6 +84,7 @@ void main() {
       expect(r.error, isNull);
       expect(r.repairs.items, isEmpty);
       expect(r.model!.typeById('interval'), isNotNull);
+      expect(r.model!.typeById('varchar_nolen'), isNotNull);
       expect(r.model!.properties.includeSchema, isFalse);
       expect(r.model!.diagrams.single.schema, '');
       expect(r.model!.tables.single.checks, isEmpty);
@@ -239,6 +240,34 @@ void main() {
       expect(self.deferrable, Deferrable.deferred);
       expect(n.columnById(self.columnPairs.single.childColumnId), isNotNull);
       expect(ModelValidator(m).validate().errors, isEmpty);
+    });
+  });
+
+  group('型のコメントとスキーマ、メソッドのスキーマ(生成)', () {
+    test('ユーザー定義型は、型名・COMMENT ON TYPE・列の型にスキーマが付く(型のスキーマが空ならモデルのスキーマ)', () {
+      final m = modelNewFeatures();
+      final json = GenerationJsonBuilder(m).build();
+      final ut = (json['userTypes'] as List);
+      final status = ut.firstWhere((t) => t['name'] == 'status_t');
+      final point = ut.firstWhere((t) => t['name'] == 'point_t');
+      expect((status['schema'], status['comment']), ('app', "状態's"));
+      expect(point['schema'], 'types'); // 型のスキーマ
+      final node = (json['tables'] as List).firstWhere((t) => t['physicalName'] == 'node');
+      final state = (node['columns'] as List).firstWhere((c) => c['physicalName'] == 'state');
+      expect(state['type'], 'app.status_t');
+      expect((json['schemas'] as List), containsAll(['app', 'types', 'fn']));
+    });
+
+    test('メソッドのスキーマ: トリガーの呼出し先に付く。外部定義、含めない設定では付かない', () {
+      final m = modelNewFeatures();
+      final json = GenerationJsonBuilder(m).build();
+      final g = ((json['tables'] as List).firstWhere((t) => t['physicalName'] == 'node')['triggers'] as List).single;
+      expect(g['methodSchema'], 'fn');
+      final empty = (json['methods'] as List).firstWhere((x) => x['name'] == 'empty_string');
+      expect(empty['schema'], ''); // 外部定義
+      m.properties.includeSchema = false;
+      final off = GenerationJsonBuilder(m).build();
+      expect(((off['userTypes'] as List).first)['schema'], '');
     });
   });
 

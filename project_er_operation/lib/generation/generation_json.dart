@@ -3,7 +3,7 @@ import 'dart:convert';
 import '../model/model.dart';
 
 /// 生成用JSON(付録B)のバージョン。付録Bを変更するときに上げる。
-const int postApiVersion = 2;
+const int postApiVersion = 3;
 
 /// 生成用JSONを作る。生成前検証(9.5)のエラーがないモデルを前提とする。
 class GenerationJsonBuilder {
@@ -119,6 +119,7 @@ class GenerationJsonBuilder {
           'body': m.bodies[_db] ?? '',
           'comment': m.comment,
           'args': m.args,
+          'schema': model.schemaOfMethod(m),
           'afterTableId': tableId,
           'afterViewId': viewId,
         };
@@ -143,6 +144,17 @@ class GenerationJsonBuilder {
       final s = model.schemaOf(e);
       if (s.isNotEmpty && !out.contains(s)) out.add(s);
     }
+    // ユーザー定義型とメソッドのスキーマは、PostgreSQL だけ使う(MySQL・SQL Server は型を出力しない)。
+    if (_db == DbKind.postgresql) {
+      for (final t in model.types.where((t) => t.isUserDefined && (t.physical[_db] ?? '').isNotEmpty)) {
+        final s = model.schemaOfType(t);
+        if (s.isNotEmpty && !out.contains(s)) out.add(s);
+      }
+      for (final x in model.methods) {
+        final s = model.schemaOfMethod(x);
+        if (s.isNotEmpty && !out.contains(s)) out.add(s);
+      }
+    }
     return out;
   }
 
@@ -160,14 +172,14 @@ class GenerationJsonBuilder {
       if (name.isEmpty) return;
       out.add({
         'name': name,
+        'schema': model.schemaOfType(t),
+        'comment': t.comment,
         'kind': t.kind.wire,
         'fields': [
           for (final f in t.fields)
             {
               'name': f.name,
-              'type': model.typeById(f.typeId)?.expand(_db,
-                      length: f.length, precision: f.precision, scale: f.scale) ??
-                  '',
+              'type': _typeSql(f.typeId, length: f.length, precision: f.precision, scale: f.scale),
             }
         ],
         'values': t.enumValues,
@@ -241,10 +253,17 @@ class GenerationJsonBuilder {
     return out;
   }
 
+  /// 型の物理名(パラメータ展開済み)。ユーザー定義型は、スキーマを付ける(6.3-8)。
+  String _typeSql(String typeId, {int? length, int? precision, int? scale}) {
+    final t = model.typeById(typeId);
+    final s = t?.expand(_db, length: length, precision: precision, scale: scale) ?? '';
+    if (t == null || !t.isUserDefined || s.isEmpty) return s;
+    final schema = model.schemaOfType(t);
+    return schema.isEmpty ? s : '$schema.$s';
+  }
+
   String _typeString(ColumnDef c) =>
-      model.typeById(c.typeId)?.expand(_db,
-          length: c.length, precision: c.precision, scale: c.scale) ??
-      '';
+      _typeSql(c.typeId, length: c.length, precision: c.precision, scale: c.scale);
 
   String _category(String typeId) =>
       (model.typeById(typeId)?.category ?? TypeCategory.string).wire;
@@ -339,6 +358,7 @@ class GenerationJsonBuilder {
           model.findExpandedColumn(t, id)?.column.physicalName ?? ''
       ],
       'methodName': m?.name,
+      'methodSchema': m == null ? '' : model.schemaOfMethod(m),
       'body': raw.replaceAll('{{table}}', t.physicalName).replaceAll('{{trigger}}', name),
     };
   }
@@ -390,14 +410,14 @@ class GenerationJsonBuilder {
         'sql': null,
         'function': {
           'name': m?.name ?? '',
+          'schema': m == null ? '' : model.schemaOfMethod(m),
           'args': v.function.args,
           'columns': [
             for (final c in v.function.columns)
               {
                 'name': c.name,
-                'type': model.typeById(c.typeId)?.expand(_db,
-                        length: c.length, precision: c.precision, scale: c.scale) ??
-                    '',
+                'type': _typeSql(c.typeId,
+                    length: c.length, precision: c.precision, scale: c.scale),
                 'typeCategory': _category(c.typeId),
               }
           ],

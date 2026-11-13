@@ -64,6 +64,9 @@ class SearchHighlights {
   final int hitCount;
 
   bool get isEmpty => light.isEmpty && strongHeaders.isEmpty && strongRows.isEmpty;
+
+  /// ヒットしたエンティティのID(ID昇順)。ヒットへの移動(3.9-16)に使う。
+  List<int> get targets => ({...light, ...strongHeaders, ...strongRows.keys}.toList()..sort());
 }
 
 /// モデルの検索(純Dart)。

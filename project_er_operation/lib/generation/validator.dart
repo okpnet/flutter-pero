@@ -131,6 +131,8 @@ class ModelValidator {
     final names = {
       model.properties.schema,
       for (final d in model.diagrams) d.schema,
+      for (final t in model.types) t.schema,
+      for (final x in model.methods) x.schema,
     }..remove('');
     for (final s in names) {
       if (!_nameOk(s)) _err('スキーマ名「$s」が形式に一致しません');

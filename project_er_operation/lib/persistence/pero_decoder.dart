@@ -174,8 +174,11 @@ class PeroDecoder {
       final t = _type(v, 'types[${i++}]');
       if (t != null) m.types.add(t);
     }
-    if (legacy && m.typeById('interval') == null) {
-      m.types.add(standardTypes().firstWhere((t) => t.id == 'interval')); // 形式2への移行
+    if (legacy) {
+      // 旧い形式への移行: 後から加わった標準型を、修復として記録せずに補う。
+      for (final id in ['interval', 'varchar_nolen']) {
+        if (m.typeById(id) == null) m.types.add(standardTypes().firstWhere((t) => t.id == id));
+      }
     }
     i = 0;
     for (final v in _list(root['methods'], 'methods')) {
@@ -247,6 +250,8 @@ class PeroDecoder {
         for (final v in _list(m['enumValues'], '$path.enumValues'))
           if (v is String) v
       ],
+      comment: _strN(m, 'comment', path),
+      schema: _strN(m, 'schema', path),
     );
   }
 
@@ -263,6 +268,7 @@ class PeroDecoder {
       bodies: _perDb(m['bodies'], '$path.bodies'),
       comment: _strN(m, 'comment', path),
       args: _strN(m, 'args', path),
+      schema: _strN(m, 'schema', path),
       dependsOnTableIds: [
         for (final v in _list(m['dependsOnTableIds'], '$path.dependsOnTableIds'))
           if (v is int) v

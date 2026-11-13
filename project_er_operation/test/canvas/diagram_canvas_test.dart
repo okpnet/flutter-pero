@@ -242,6 +242,32 @@ void main() {
     expect((pl(a.id).x, pl(a.id).y), (100, 100));
   });
 
+  testWidgets('列のドラッグ中にダイアグラムを切り替えても続けられ、別のダイアグラムのテーブルへドロップできる(3.4-9)', (tester) async {
+    final m = session.model;
+    final c = table(m, 'c', [col(m, 'id', 'auto', pk: true)], x: 300, y: 300);
+    // c は2つめのダイアグラムにだけ配置する
+    m.diagrams.first.placements.removeWhere((p) => p.entityId == c.id);
+    final d2 = Diagram(id: m.allocateId(), name: 'ダイアグラム2')..placements.add(Placement(entityId: c.id, x: 300, y: 300));
+    m.diagrams.add(d2);
+    await pumpCanvas(tester);
+    final g = await tester.startGesture(const Offset(150, 135), kind: PointerDeviceKind.mouse);
+    await g.moveTo(const Offset(300, 200));
+    await tester.pump();
+    final state = tester.state<DiagramCanvasState>(find.byType(DiagramCanvas));
+    expect(state.columnDragPointer.value, isNotNull); // メイン画面がタブの切替に使う
+    session.currentDiagramId = d2.id; // タブの上でドラッグを止めて切り替わった
+    await tester.pump();
+    await g.moveTo(const Offset(320, 340)); // c の列行
+    await tester.pump();
+    final painter = tester.widget<CustomPaint>(find.byType(CustomPaint).last).painter as DiagramPainter;
+    expect(painter.columnDrag, isNotNull);
+    expect(painter.columnDrag!.targetRect, isNotNull);
+    await g.up();
+    await tester.pump();
+    expect(host.connected, [a.id, a.columns[0].id, c.id, c.columns[0].id]);
+    expect(state.columnDragPointer.value, isNull);
+  });
+
   testWidgets('エンティティ(ヘッダ)へのドロップは列未指定、空白へのドロップは何もしない', (tester) async {
     await pumpCanvas(tester);
     var g = await tester.startGesture(const Offset(150, 135), kind: PointerDeviceKind.mouse);

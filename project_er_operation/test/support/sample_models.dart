@@ -61,6 +61,8 @@ ErModel fullModel() {
   m.types.add(DataType(
       id: 'custom_1',
       displayName: 'money',
+      comment: '金額',
+      schema: 'dom',
       paramKind: ParamKind.precisionScale,
       defaultPrecision: 10,
       defaultScale: 2,
@@ -69,6 +71,7 @@ ErModel fullModel() {
   final fn = MethodDef(
       id: m.allocateId(),
       name: 'now_utc',
+      schema: 'util',
       comment: '現在のUTC時刻',
       args: '',
       call: {DbKind.postgresql: "timezone('utc', now())", DbKind.mysql: '', DbKind.sqlserver: '', DbKind.sqlite: ''},

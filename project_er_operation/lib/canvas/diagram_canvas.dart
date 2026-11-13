@@ -67,9 +67,12 @@ class DiagramCanvasState extends State<DiagramCanvas> {
   Rect? _marquee;
   int? _colEntity;
   int? _colColumn;
-  Rect? _colRect;
   String _colLabel = "";
   ColumnDragVisual? _colDrag;
+
+  /// 列ドラッグ中のポインタの位置(画面座標)。ドラッグ中だけ値を持つ。
+  /// メイン画面が、別のダイアグラムのタブの上でドラッグを止めたときに、タブを切り替えるために使う(3.4-9)。
+  final ValueNotifier<Offset?> columnDragPointer = ValueNotifier(null);
   Offset _marqueeStart = Offset.zero;
   DateTime _lastTap = DateTime.fromMillisecondsSinceEpoch(0);
   int? _lastTapId;
@@ -81,7 +84,7 @@ class DiagramCanvasState extends State<DiagramCanvas> {
     s.viewTick.removeListener(_onViewChanged);
     _pictures.clear();
     _focus.dispose();
-
+    columnDragPointer.dispose();
     super.dispose();
   }
 
@@ -137,15 +140,33 @@ class DiagramCanvasState extends State<DiagramCanvas> {
     return (c.id, Rect.fromLTWH(r.left, top, r.width, l.rowHeight), '${c.physicalName}  ${s.model.typeLabel(c)}');
   }
 
+  /// ドラッグ元の列行の矩形。ダイアグラムを切り替えたあとは、元のテーブルが配置されていれば、その位置。
+  /// 配置されていなければ、ポインタの位置(元からの線は引かない)。
+  Rect _sourceRect(Offset pointer) {
+    final src = _colEntity, col = _colColumn;
+    final e = src == null ? null : s.model.entityById(src);
+    final p = src == null ? null : s.diagram.placementOf(src);
+    if (e is TableEntity && p != null && !p.collapsed && col != null) {
+      final cols = s.model.expand(e).columns;
+      final i = cols.indexWhere((c) => c.column.id == col);
+      if (i >= 0) {
+        final r = _rectOfPlacement(p);
+        final l = s.layouter;
+        return Rect.fromLTWH(r.left, r.top + l.headerHeight + i * l.rowHeight, r.width, l.rowHeight);
+      }
+    }
+    return Rect.fromCenter(center: pointer, width: 1, height: 1);
+  }
+
   ColumnDragVisual? _colVisual(Offset pointer) {
-    if (_colRect == null) return null;
+    if (_colEntity == null) return null;
     Rect? target;
     final hit = _hitEntity(pointer);
     if (hit != null && hit != _colEntity && s.model.entityById(hit) is TableEntity) {
       final row = _rowAt(hit, pointer);
       target = row?.$2 ?? _rectOfPlacement(s.diagram.placementOf(hit)!);
     }
-    return ColumnDragVisual(from: _colRect!, pointer: pointer, label: _colLabel, targetRect: target);
+    return ColumnDragVisual(from: _sourceRect(pointer), pointer: pointer, label: _colLabel, targetRect: target);
   }
 
   /// 折りたたみボタンの領域か(ヘッダ右端)。
@@ -251,7 +272,6 @@ class DiagramCanvasState extends State<DiagramCanvas> {
           _mode = _Mode.column;
           _colEntity = hit;
           _colColumn = row.$1;
-          _colRect = row.$2;
           _colLabel = row.$3;
           _dragMoved = false;
           _dragStartModel = m;
@@ -319,6 +339,7 @@ class DiagramCanvasState extends State<DiagramCanvas> {
         if (!_dragMoved && (m - _dragStartModel).distance * s.diagram.view.zoom < 3) return;
         _dragMoved = true;
         _colDrag = _colVisual(m);
+        columnDragPointer.value = e.position;
         setState(() {});
       case _Mode.none:
         break;
@@ -342,7 +363,7 @@ class DiagramCanvasState extends State<DiagramCanvas> {
         final src = _colEntity, col = _colColumn;
         final target = _dragMoved ? _hitEntity(m) : null;
         _colDrag = null;
-        _colRect = null;
+        columnDragPointer.value = null;
         if (src != null && col != null && target != null) {
           final row = _rowAt(target, m)?.$1;
           // 同じテーブルへのドロップは自己参照。別の列行へのドロップのときだけ作る(3.4-9)。

@@ -134,7 +134,7 @@ void main() {
     expect(r!.isOk, isTrue);
     expect(s.isDirty, isFalse);
     expect(s.filePath, p('via.pero'));
-    expect(String.fromCharCodes(got!).startsWith('{\n  "formatVersion": 2'), isTrue);
+    expect(String.fromCharCodes(got!).startsWith('{\n  "formatVersion": 3'), isTrue);
     expect((await PeroFile.open(p('via.pero'))).model, isNotNull);
     expect(File(p('via.pero.tmp')).existsSync(), isFalse);
   });

@@ -258,6 +258,14 @@ class _TypeEditorState extends State<TypeEditor> {
         ),
         TextButton.icon(onPressed: _delete, icon: const Icon(Icons.delete_outline, size: 16), label: const Text('削除')),
       ]),
+      textField('スキーマ(空でモデルのスキーマ)', cur.schema, (v) {
+        cur.schema = v;
+        widget.onChanged?.call();
+      }, key: ValueKey('us${cur.id}')),
+      textField('コメント(COMMENT ON TYPE で出力)', cur.comment, (v) {
+        cur.comment = v;
+        widget.onChanged?.call();
+      }, key: ValueKey('uc${cur.id}'), multiline: true),
       const SizedBox(height: 8),
       if (isComposite) ...[
         Row(children: [
