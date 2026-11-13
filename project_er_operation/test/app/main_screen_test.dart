@@ -122,4 +122,26 @@ void main() {
     expect(find.textContaining('見つかりません'), findsNothing);
     expect(destroyed, 0);
   });
+
+  testWidgets('読込中は、画面全体のオーバーレイとローディング(くるくる)を表示し、終わると消える', (tester) async {
+    final s = await pump(tester);
+    expect(find.byKey(const ValueKey('busyOverlay')), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    s.busyMessage.value = Strings.loadingFile('pms_test.pero');
+    await tester.pump();
+    expect(find.byKey(const ValueKey('busyOverlay')), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.text('pms_test.pero を読み込み中…'), findsOneWidget);
+    // 画面全体を覆う
+    final size = tester.getSize(find.byKey(const ValueKey('busyOverlay')));
+    expect(size, const Size(1280, 800));
+    // 覆っている間は、下の画面の操作(サイドメニューのタブ)を受け付けない
+    await tester.tap(find.byKey(const ValueKey('sideTab2')), warnIfMissed: false);
+    await tester.pump();
+    expect(find.text('元に戻す'), findsNothing);
+    s.busyMessage.value = null;
+    await tester.pump();
+    expect(find.byKey(const ValueKey('busyOverlay')), findsNothing);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+  });
 }

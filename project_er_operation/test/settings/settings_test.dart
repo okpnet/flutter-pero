@@ -138,4 +138,13 @@ void main() {
     expect((r.theme, r.userThemeFile, r.postKindsText), (ThemeChoice.system, '', ''));
     expect((r.sideMenuOpen, r.rightPaneOpen), (true, true));
   });
+
+  test('生成ファイルの拡張子: 既定は sql。post(ポストファイルと同じ)・空は sql にする。ドットと大文字は正規化', () {
+    expect(AppSettings().outputExtension, 'sql');
+    expect((AppSettings()..generatedExtension = 'post').outputExtension, 'sql');
+    expect((AppSettings()..generatedExtension = '.POST').outputExtension, 'sql');
+    expect((AppSettings()..generatedExtension = '  ').outputExtension, 'sql');
+    expect((AppSettings()..generatedExtension = '.TXT').outputExtension, 'txt');
+    expect((AppSettings()..generatedExtension = 'ddl').outputExtension, 'ddl');
+  });
 }

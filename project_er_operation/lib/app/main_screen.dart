@@ -223,12 +223,15 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
           child: Focus(
             autofocus: true,
             child: Scaffold(
-              body: Column(children: [
-                _topBar(),
-                const Divider(height: 1),
-                Expanded(child: _body()),
-                const Divider(height: 1),
-                _statusBar(),
+              body: Stack(children: [
+                Column(children: [
+                  _topBar(),
+                  const Divider(height: 1),
+                  Expanded(child: _body()),
+                  const Divider(height: 1),
+                  _statusBar(),
+                ]),
+                _busyOverlay(),
               ]),
             ),
           ),
@@ -236,6 +239,32 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
       },
     );
   }
+
+  /// 読込などの間、画面全体を覆い、操作を受け付けず、ローディング(くるくる)とメッセージを表示する。
+  Widget _busyOverlay() => ValueListenableBuilder<String?>(
+        valueListenable: s.busyMessage,
+        builder: (context, message, _) {
+          if (message == null) return const SizedBox.shrink();
+          return Positioned.fill(
+            key: const ValueKey('busyOverlay'),
+            child: Stack(children: [
+              const ModalBarrier(dismissible: false, color: Colors.black54),
+              Center(
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 3)),
+                      const SizedBox(width: 16),
+                      Text(message),
+                    ]),
+                  ),
+                ),
+              ),
+            ]),
+          );
+        },
+      );
 
   void _undo() {
     if (_editingText) return;

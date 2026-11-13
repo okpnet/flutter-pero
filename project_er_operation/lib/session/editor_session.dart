@@ -44,6 +44,9 @@ class EditorSession extends ChangeNotifier {
   /// ズーム・スクロールの変更通知(9.1-6でUndo対象外)。画面全体ではなく、キャンバスとズーム表示だけが購読する。
   final ValueNotifier<int> viewTick = ValueNotifier<int>(0);
 
+  /// 時間のかかる処理(ファイルの読込)の間に、画面全体を覆って表示するメッセージ。nullなら表示しない。
+  final ValueNotifier<String?> busyMessage = ValueNotifier<String?>(null);
+
   ErModel get model => history.model;
   bool get isDirty => history.isDirty;
 
@@ -399,6 +402,7 @@ class EditorSession extends ChangeNotifier {
   void dispose() {
     _backupTimer?.cancel();
     viewTick.dispose();
+    busyMessage.dispose();
     super.dispose();
   }
 }

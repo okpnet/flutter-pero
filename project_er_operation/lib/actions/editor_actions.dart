@@ -94,7 +94,16 @@ class EditorActions implements CanvasHost {
       session.notify(null);
       return;
     }
-    final r = await session.open(path);
+    // 読込の間は、オーバーレイとローディングを表示する。読込後の最初の画面の描画(重い)が終わるまで続ける。
+    if (session.busyMessage.value != null) return;
+    session.busyMessage.value = Strings.loadingFile(path.substring(path.lastIndexOf(Platform.pathSeparator) + 1));
+    final LoadResult r;
+    try {
+      r = await session.open(path);
+      await WidgetsBinding.instance.endOfFrame;
+    } finally {
+      session.busyMessage.value = null;
+    }
     if (!_ctx.mounted) return;
     if (r.model == null) {
       await showMessageDialog(_ctx, title: Strings.error, message: r.error ?? 'ファイルを開けませんでした');
@@ -579,17 +588,25 @@ class EditorActions implements CanvasHost {
   Future<void> generate() async {
     final ctx = _ctx;
     final logger = session.logger;
-    // ポストファイルの確認(9.6-1-2)。パスが空のときだけ、ファイルを選ばせる。
+    // ポストファイルの確認(9.6-1-2)。パスが空のときは、ポストフォルダの一覧から、モデルの対象DBの
+    // ポストファイル(無ければ先頭)を使う。ファイルを開くダイアログは、一覧に使えるものがないときだけ出す。
     var postPath = session.model.properties.postPath;
     if (postPath.isEmpty) {
-      final folder = session.postFolderPath();
-      final picked = await dialogs.pickOpen(
-        title: 'ポストファイルを選択',
-        extensions: ['post'],
-        initialDirectory: Directory(folder).existsSync() ? folder : null,
-      );
-      if (picked == null) return;
-      postPath = picked;
+      final assoc = session.settings.postKinds;
+      final byKind = session.postCatalog.forKind(session.model.properties.targetDb, assoc);
+      final auto = byKind.isNotEmpty ? byKind.first : session.postCatalog.valid.firstOrNull;
+      if (auto != null) {
+        postPath = auto.path;
+      } else {
+        final folder = session.postFolderPath();
+        final picked = await dialogs.pickOpen(
+          title: 'ポストファイルを選択',
+          extensions: ['post'],
+          initialDirectory: Directory(folder).existsSync() ? folder : null,
+        );
+        if (picked == null) return;
+        postPath = picked;
+      }
       session.run(UpdateModelPropertiesCommand({'postPath': postPath}));
     }
     // 指定されたポストファイルを、生成の間ロックする(存在しないときは処理を止める)。
@@ -660,26 +677,35 @@ class EditorActions implements CanvasHost {
       if (ctx.mounted) await showValidationErrors(ctx, out.errors, out.warnings);
       return;
     }
+    // 出力先は、保存ダイアログで選ぶ。既定のフォルダ・ファイル名は、モデルの出力設定(9.6-1-5)から決める。
     final path = resolveOutputPath(
       model: model,
       peroFilePath: session.filePath,
       documentsDir: await _documentsDir(),
-      extension: session.settings.generatedExtension,
+      extension: session.settings.outputExtension,
     );
-    if (File(path).existsSync() && ctx.mounted) {
-      final ok = await showConfirmDialog(ctx, title: '上書きの確認', message: '既存のファイルを上書きしますか?\n$path');
-      if (!ok) return;
-    }
+    final sepAt = path.lastIndexOf(Platform.pathSeparator);
+    final dir = path.substring(0, sepAt);
+    final String? saved;
     try {
-      Directory(File(path).parent.path).createSync(recursive: true);
-      await writeGeneratedFile(path, out.text!, crlf: session.settings.crlf);
+      saved = await dialogs.saveBytes(
+        title: Strings.runGenerate,
+        fileName: path.substring(sepAt + 1),
+        bytes: generatedFileBytes(out.text!, crlf: session.settings.crlf),
+        extension: session.settings.outputExtension,
+        initialDirectory: Directory(dir).existsSync() ? dir : null,
+      );
     } on FileSystemException catch (e, st) {
       logger.error('生成ファイルの書込みに失敗: $path', e, st);
       if (ctx.mounted) await showMessageDialog(ctx, title: Strings.error, message: '書込みに失敗しました: ${e.message}');
       return;
     }
-    logger.info('生成しました: $path (警告${out.warnings.length}件)');
-    if (ctx.mounted) await showGenerationResult(ctx, path: path, warnings: out.warnings);
+    if (saved == null) {
+      session.notify(Strings.generateCanceled);
+      return;
+    }
+    logger.info('生成しました: $saved (警告${out.warnings.length}件)');
+    if (ctx.mounted) await showGenerationResult(ctx, path: saved, warnings: out.warnings);
   }
 
   Future<void> exportJson() async {

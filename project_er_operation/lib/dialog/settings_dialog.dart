@@ -32,7 +32,7 @@ List<_Item> _items() => [
       _Item('ポストファイル', 'ファイル', _Kind.text, get: (s) => s.postFile, set: (s, v) => s.postFile = v as String),
       _Item('ポストファイル', '種類(kind)の関連付け', _Kind.text, get: (s) => s.postKindsText, set: (s, v) => s.postKindsText = v as String, note: 'メタ情報の targetDb が postgresql / mysql / sqlserver / sqlite 以外のポストファイルを、既存の種類として扱います。「ファイル名=種類」をカンマ区切りで指定します(例: mariadb.post=mysql)'),
       _Item('ポストファイル', '実行タイムアウト(秒)', _Kind.integer, min: 1, max: 300, get: (s) => s.postTimeoutSeconds, set: (s, v) => s.postTimeoutSeconds = v as int),
-      _Item('生成', '生成ファイルの拡張子', _Kind.text, get: (s) => s.generatedExtension, set: (s, v) => s.generatedExtension = v as String),
+      _Item('生成', '生成ファイルの拡張子', _Kind.text, get: (s) => s.generatedExtension, set: (s, v) => s.generatedExtension = v as String, note: '既定は sql です。ポストファイルと同じ post は使えません(sql になります)'),
       _Item('生成', '改行コード', _Kind.choice, choices: {true: 'CRLF', false: 'LF'}, get: (s) => s.crlf, set: (s, v) => s.crlf = v as bool),
       _Item('生成', '主キー制約名のプリフィクス', _Kind.text, get: (s) => s.pkPrefix, set: (s, v) => s.pkPrefix = v as String, note: '主キー制約名は「プリフィクス + テーブル物理名 + サフィックス」です'),
       _Item('生成', '主キー制約名のサフィックス', _Kind.text, get: (s) => s.pkSuffix, set: (s, v) => s.pkSuffix = v as String),

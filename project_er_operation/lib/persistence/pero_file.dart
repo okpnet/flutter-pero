@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../model/model.dart';
@@ -63,10 +64,20 @@ class PeroFile {
   }
 
   /// 読込。修復があった場合は元のファイルを `.pero.bak` へ退避する(9.4-6)。
+  /// 読み込みと復元(整合性確認を含む)は別Isolateで行い、画面(読込中の表示)を止めない。
+  /// 結果を別Isolateから受け取れないときは、このIsolateで読み込む。
   static Future<LoadResult> open(String path) async {
+    try {
+      return await Isolate.run(() => _openBlocking(path));
+    } on Object {
+      return _openBlocking(path);
+    }
+  }
+
+  static LoadResult _openBlocking(String path) {
     final String text;
     try {
-      text = await File(path).readAsString(encoding: utf8);
+      text = File(path).readAsStringSync(encoding: utf8);
     } on FileSystemException catch (e) {
       return LoadResult.fail('読込に失敗しました: ${e.message}');
     } on FormatException {
@@ -75,7 +86,7 @@ class PeroFile {
     final r = PeroDecoder.decode(text.startsWith('﻿') ? text.substring(1) : text);
     if (r.model != null && !r.repairs.isEmpty) {
       try {
-        await File(path).copy('$path.bak');
+        File(path).copySync('$path.bak');
       } on FileSystemException {
         // 退避失敗は読込自体を妨げない。
       }

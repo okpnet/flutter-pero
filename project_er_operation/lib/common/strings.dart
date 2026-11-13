@@ -35,6 +35,8 @@ class Strings {
   static const showSideMenu = 'サイドメニューを表示';
   static const hideRightPane = 'プロパティを隠す';
   static const showRightPane = 'プロパティを表示';
+  static String loadingFile(String name) => '$name を読み込み中…';
+  static const generateCanceled = '生成ファイルの保存を中止しました';
   static const autoLayoutNothing = '自動配置の対象がありません';
   static const autoLayoutFailed = '自動配置に失敗しました';
   static String autoLayoutDone(int n) => '自動配置: $n件を配置しました';

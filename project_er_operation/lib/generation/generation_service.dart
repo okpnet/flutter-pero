@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../model/model.dart';
 import 'generation_json.dart';
@@ -60,9 +61,13 @@ String resolveOutputPath({
   return '$folder$sep$name.$ext';
 }
 
+/// 改行を変換した、UTF-8(BOMなし)のバイト列。
+Uint8List generatedFileBytes(String text, {required bool crlf}) {
+  final normalized = text.replaceAll('\r\n', '\n');
+  return Uint8List.fromList(utf8.encode(crlf ? normalized.replaceAll('\n', '\r\n') : normalized));
+}
+
 /// 改行を変換して、UTF-8(BOMなし)で書く。
 Future<void> writeGeneratedFile(String path, String text, {required bool crlf}) async {
-  final normalized = text.replaceAll('\r\n', '\n');
-  final body = crlf ? normalized.replaceAll('\n', '\r\n') : normalized;
-  await File(path).writeAsString(body, encoding: utf8, flush: true);
+  await File(path).writeAsBytes(generatedFileBytes(text, crlf: crlf), flush: true);
 }

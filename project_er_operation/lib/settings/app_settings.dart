@@ -32,6 +32,13 @@ class AppSettings {
   String postKindsText = '';
 
   Map<String, DbKind> get postKinds => parseKindAssociations(postKindsText);
+
+  /// 生成ファイルの拡張子(ドットなし、小文字)。空、または `post`(ポストファイルと同じ拡張子)のときは `sql`。
+  String get outputExtension {
+    final e = generatedExtension.trim().replaceFirst(RegExp(r'^\.+'), '').toLowerCase();
+    return e.isEmpty || e == 'post' ? 'sql' : e;
+  }
+
   // 生成
   String generatedExtension = 'sql';
   bool crlf = true;
