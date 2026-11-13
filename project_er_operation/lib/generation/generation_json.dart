@@ -40,21 +40,7 @@ class GenerationJsonBuilder {
       },
       'schemas': _schemas(),
       'userTypes': _userTypes(),
-      'methods': [
-        for (final m in model.methods)
-          {
-            'id': m.id,
-            'name': m.name,
-            'kind': m.kind.wire,
-            'external': m.external,
-            'call': m.kind == MethodKind.function ? m.callExpr(_db) : '',
-            'body': m.bodies[_db] ?? '',
-            'comment': m.comment,
-            'args': m.args,
-            'afterTableId': m.kind == MethodKind.function ? _afterTable(m, ordered) : null,
-            'afterViewId': m.kind == MethodKind.function ? _afterView(m) : null,
-          }
-      ],
+      'methods': _methods(ordered),
       'tables': [for (final t in ordered) _table(t)],
       'foreignKeys': [
         for (final r in (model.relationships.toList()..sort((a, b) => a.id.compareTo(b.id))))
@@ -64,6 +50,90 @@ class GenerationJsonBuilder {
         for (final v in (model.views.toList()..sort((a, b) => a.id.compareTo(b.id)))) _view(v)
       ],
     };
+  }
+
+  /// メソッドの一覧。ファンクションは、本体で呼んでいる別のファンクションより後に並べ、
+  /// 出力位置(afterTableId / afterViewId)も、呼んでいる先より前にならないよう引き上げる(8.1-14)。
+  /// LANGUAGE sql のファンクションは、作成時に本体が検査されるため、呼出し先が先に存在する必要がある。
+  List<Map<String, Object?>> _methods(List<TableEntity> ordered) {
+    final views = model.views.toList()..sort((a, b) => a.id.compareTo(b.id));
+    final fns = [for (final m in model.methods) if (m.kind == MethodKind.function) m];
+    final nameRe = <int, RegExp>{
+      for (final f in fns)
+        f.id: RegExp(r'(?<![A-Za-z0-9_$])' + RegExp.escape(f.name) + r'\s*\(', caseSensitive: false),
+    };
+    // 呼出し先(定義を出力するファンクションのみ)
+    final callees = <int, List<MethodDef>>{};
+    for (final f in fns) {
+      final body = f.bodies[_db] ?? '';
+      callees[f.id] = [
+        if (!f.external && body.trim().isNotEmpty)
+          for (final g in fns)
+            if (g.id != f.id &&
+                !g.external &&
+                (g.bodies[_db] ?? '').trim().isNotEmpty &&
+                nameRe[g.id]!.hasMatch(body))
+              g
+      ];
+    }
+
+    int ownRank(MethodDef m) {
+      final v = _afterView(m);
+      if (v != null) return ordered.length + views.indexWhere((x) => x.id == v);
+      final t = _afterTable(m, ordered);
+      return t == null ? -1 : ordered.indexWhere((x) => x.id == t);
+    }
+
+    final rank = <int, int>{};
+    final order = <MethodDef>[];
+    final visiting = <int>{};
+    void visit(MethodDef f) {
+      if (rank.containsKey(f.id) || !visiting.add(f.id)) return;
+      var r = ownRank(f);
+      for (final g in callees[f.id]!) {
+        visit(g);
+        final gr = rank[g.id];
+        if (gr != null && gr > r) r = gr;
+      }
+      rank[f.id] = r;
+      order.add(f);
+    }
+
+    for (final f in fns) {
+      visit(f);
+    }
+    // 位置の昇順に並べる(同じ位置の中は、呼出し先が先の順を保つ)。
+    final sorted = [
+      for (var i = 0; i < order.length; i++) (i, order[i]),
+    ]..sort((a, b) {
+        final c = rank[a.$2.id]!.compareTo(rank[b.$2.id]!);
+        return c != 0 ? c : a.$1.compareTo(b.$1);
+      });
+
+    Map<String, Object?> json(MethodDef m, {int? tableId, int? viewId}) => {
+          'id': m.id,
+          'name': m.name,
+          'kind': m.kind.wire,
+          'external': m.external,
+          'call': m.kind == MethodKind.function ? m.callExpr(_db) : '',
+          'body': m.bodies[_db] ?? '',
+          'comment': m.comment,
+          'args': m.args,
+          'afterTableId': tableId,
+          'afterViewId': viewId,
+        };
+
+    return [
+      for (final (_, f) in sorted)
+        () {
+          final r = rank[f.id]!;
+          if (r >= ordered.length) return json(f, viewId: views[r - ordered.length].id);
+          if (r >= 0) return json(f, tableId: ordered[r].id);
+          return json(f);
+        }(),
+      for (final m in model.methods)
+        if (m.kind != MethodKind.function) json(m),
+    ];
   }
 
   /// 出力に使うスキーマの一覧(重複なし。出力にスキーマを含めるときのみ)。

@@ -69,6 +69,30 @@ void main() {
     expect((vf['afterTableId'], vf['afterViewId']), (null, view['id']));
   });
 
+  test('ファンクションは、本体で呼んでいるファンクションの後に出力する', () async {
+    final m = modelNewFeatures();
+    // 呼ぶ側を先に登録し、依存テーブルは指定しない(呼出し先 count_nodes は node の後)。
+    final caller = MethodDef(
+        id: m.allocateId(),
+        name: 'twice_nodes',
+        bodies: {
+          for (final d in DbKind.values)
+            d: d == DbKind.postgresql
+                ? 'CREATE FUNCTION twice_nodes() RETURNS bigint AS \$\$ SELECT public.count_nodes() * 2 \$\$ LANGUAGE sql'
+                : ''
+        });
+    m.methods.insert(0, caller);
+    final json = GenerationJsonBuilder(m).build();
+    final names = (json['methods'] as List).map((x) => x['name']).toList();
+    expect(names.indexOf('count_nodes') < names.indexOf('twice_nodes'), isTrue);
+    final node = (json['tables'] as List).firstWhere((t) => t['physicalName'] == 'node');
+    final tw = (json['methods'] as List).firstWhere((x) => x['name'] == 'twice_nodes');
+    expect(tw['afterTableId'], node['id']);
+    final sql = await generateSql(m);
+    expect(sql.indexOf('FUNCTION count_nodes') < sql.indexOf('FUNCTION twice_nodes'), isTrue);
+    expect(sql.indexOf('CREATE TABLE app.node') < sql.indexOf('FUNCTION twice_nodes'), isTrue);
+  });
+
   test('循環する外部キーは deferred になり、トポロジカル順に並ぶ', () {
     final json = GenerationJsonBuilder(modelTriggersAndCycle()).build();
     final fks = json['foreignKeys'] as List;
