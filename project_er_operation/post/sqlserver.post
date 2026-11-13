@@ -1,0 +1,202 @@
+// @post name=SQL Server targetDb=sqlserver apiVersion=2
+//
+// PERO 同梱のポストファイル(SQL Server 2016 SP1以降のT-SQL用)。生成用JSON(apiVersion 2)からSQLを作る。
+// 出力順: 開始クエリ → スキーマ → ファンクション → テーブル(依存するファンクションを直後に)
+//         → 外部キー → ビュー → トリガー → 終了クエリ
+//
+// バッチの区切り: CREATE VIEW / CREATE TRIGGER / CREATE FUNCTION は、バッチの先頭に置く必要があるため、
+//   前後を `GO` で区切る(sqlcmd、SSMS などのクライアントのコマンド)。
+//
+// SQL Serverで表せないものの扱い:
+//   ユーザー定義型(CREATE TYPE)      : 出力しない(コメントで残す)。
+//   NULLS NOT DISTINCT                : SQL Serverの UNIQUE は NULL を同じ値として扱うため、そのまま UNIQUE にする。
+//   DEFERRABLE                        : 出力しない(コメントで残す)。
+//   ON DELETE / ON UPDATE RESTRICT    : NO ACTION にする(コメントで残す)。
+//   トリガーの BEFORE                  : SQL Serverにはない。AFTER トリガーにする(コメントで残す)。
+//   トリガーの ROW / WHEN / UPDATE OF  : 出力しない(コメントで残す)。トリガーは文単位。本体で inserted / deleted と UPDATE(列) を使う。
+//   CASCADE を付けた DROP TABLE        : 先に外部キー制約を削除する。
+//
+// トリガーの本体の規約:
+//   本体は「CREATE TRIGGER 文の `AS` の後ろ」(T-SQLの文)。`{{table}}`、`{{trigger}}` は置換済み。
+//   公開(public)のメソッド、入力(inline)のどちらも同じ。
+function main(jsonText) {
+  var m = JSON.parse(jsonText);
+  var out = [];
+
+  function q(name) { return '[' + String(name).replace(/\]/g, ']]') + ']'; }
+  function lit(s) { return "N'" + String(s).replace(/'/g, "''") + "'"; }
+  function qt(schema, name) { return schema ? q(schema) + '.' + q(name) : q(name); }
+  var drop = m.model.dropBeforeCreate === true;
+  function list(names) { return names.map(q).join(', '); }
+  function endSemi(s) {
+    var t = s.replace(/\s+$/, '');
+    return /;$/.test(t) ? t : t + ';';
+  }
+  function push(s) { if (s !== null && s !== undefined && String(s).replace(/\s+/g, '') !== '') out.push(String(s).replace(/\s+$/, '')); }
+  function go() { out.push('GO'); }
+  function note(s) { push('-- [PERO] ' + s); }
+  function schemaOf(s) { return s ? s : 'dbo'; }
+
+  function defaultText(c) {
+    var d = c.default;
+    if (d.kind === 'method') return '(' + d.call + ')';
+    if (d.kind === 'expression') return /^\(.*\)$/.test(d.expression) ? d.expression : '(' + d.expression + ')';
+    if (d.kind !== 'value') return null;
+    switch (c.typeCategory) {
+      case 'number':
+      case 'auto':
+        return d.value;
+      case 'boolean':
+        return /^(true|1)$/i.test(d.value) ? '1' : (/^(false|0)$/i.test(d.value) ? '0' : d.value);
+      default:
+        return lit(d.value);
+    }
+  }
+
+  function unset(x) { return x === null || x === undefined; }
+  function definable(f) { return f.kind === 'function' && !f.external && f.body.replace(/\s+/g, '') !== ''; }
+  function emitFunction(f) {
+    go();
+    push(endSemi(f.body));
+    go();
+    if (f.comment) {
+      push('EXEC sp_addextendedproperty @name = N\'MS_Description\', @value = ' + lit(f.comment) +
+        ', @level0type = N\'SCHEMA\', @level0name = N\'dbo\', @level1type = N\'FUNCTION\', @level1name = ' + lit(f.name) + ';');
+    }
+  }
+  function describe(value, schema, table, column) {
+    var s = 'EXEC sp_addextendedproperty @name = N\'MS_Description\', @value = ' + lit(value) +
+      ', @level0type = N\'SCHEMA\', @level0name = ' + lit(schemaOf(schema)) +
+      ', @level1type = N\'TABLE\', @level1name = ' + lit(table);
+    if (column) s += ', @level2type = N\'COLUMN\', @level2name = ' + lit(column);
+    return s + ';';
+  }
+
+  // 1. 開始クエリ
+  push(m.model.startQuery);
+
+  // 2. スキーマ
+  (m.schemas || []).forEach(function (s) {
+    push('IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = ' + lit(s) + ') EXEC(' + lit('CREATE SCHEMA ' + q(s)) + ');');
+  });
+
+  // 3. ユーザー定義型は出力しない
+  m.userTypes.forEach(function (t) { note('ユーザー定義型 ' + t.name + ' は SQL Server にないため出力しません'); });
+
+  // 4. ファンクション(依存テーブルのないもの)
+  m.methods.forEach(function (f) {
+    if (definable(f) && unset(f.afterTableId) && unset(f.afterViewId)) emitFunction(f);
+  });
+
+  // 5. テーブル(依存順)。再実行用のDROPでは、先に外部キー制約を削除する。
+  if (drop) {
+    m.foreignKeys.forEach(function (f) {
+      var child = qt(f.childSchema, f.childTable);
+      push('IF OBJECT_ID(' + lit(child) + ', N\'U\') IS NOT NULL ALTER TABLE ' + child + ' DROP CONSTRAINT IF EXISTS ' + q(f.name) + ';');
+    });
+  }
+  m.tables.forEach(function (t) {
+    var name = qt(t.schema, t.physicalName);
+    push(t.preQuery);
+    if (drop) push('DROP TABLE IF EXISTS ' + name + ';');
+    var lines = t.columns.map(function (c) {
+      var s = '  ' + q(c.physicalName) + ' ' + c.type;
+      s += c.notNull ? ' NOT NULL' : ' NULL';
+      var d = defaultText(c);
+      if (d !== null && d !== '') s += ' DEFAULT ' + d;
+      return s;
+    });
+    if (t.primaryKey) {
+      lines.push('  CONSTRAINT ' + q(t.primaryKey.name) + ' PRIMARY KEY (' + list(t.primaryKey.columns) + ')');
+    }
+    t.checks.forEach(function (k) {
+      lines.push('  CONSTRAINT ' + q(k.name) + ' CHECK (' + k.expression + ')');
+    });
+    push('CREATE TABLE ' + name + ' (\n' + lines.join(',\n') + '\n);');
+    t.indexes.forEach(function (i) {
+      push('CREATE INDEX ' + q(i.name) + ' ON ' + name + ' (' + list(i.columns) + ');');
+    });
+    t.uniques.forEach(function (u) {
+      push('ALTER TABLE ' + name + ' ADD CONSTRAINT ' + q(u.name) + ' UNIQUE (' + list(u.columns) + ');');
+    });
+    if (t.comment) push(describe(t.comment, t.schema, t.physicalName, null));
+    t.columns.forEach(function (c) {
+      if (c.comment) push(describe(c.comment, t.schema, t.physicalName, c.physicalName));
+    });
+    push(t.postQuery);
+    m.methods.forEach(function (f) {
+      if (definable(f) && f.afterTableId === t.id) emitFunction(f);
+    });
+  });
+
+  // 6. 外部キー(すべてのテーブルの作成後)
+  m.foreignKeys.forEach(function (f) {
+    var s = 'ALTER TABLE ' + qt(f.childSchema, f.childTable) + ' ADD CONSTRAINT ' + q(f.name) +
+      ' FOREIGN KEY (' + list(f.columns.map(function (c) { return c.child; })) + ')' +
+      ' REFERENCES ' + qt(f.parentSchema, f.parentTable) + ' (' + list(f.columns.map(function (c) { return c.parent; })) + ')';
+    function action(a) {
+      if (a === 'RESTRICT') { note(f.name + ': RESTRICT は SQL Server にないため、NO ACTION にしました'); return 'NO ACTION'; }
+      return a;
+    }
+    if (f.onDelete) s += ' ON DELETE ' + action(f.onDelete);
+    if (f.onUpdate) s += ' ON UPDATE ' + action(f.onUpdate);
+    if (f.deferrable) note(f.name + ': ' + f.deferrable + ' は SQL Server にないため出力しません');
+    push(s + ';');
+  });
+
+  // 7. ビュー(CREATE VIEW はバッチの先頭)
+  function qualified(expr) {
+    var i = expr.indexOf('.');
+    return i < 0 ? q(expr) : q(expr.substring(0, i)) + '.' + q(expr.substring(i + 1));
+  }
+  m.views.forEach(function (v) {
+    var name = qt(v.schema, v.physicalName);
+    push(v.preQuery);
+    var body;
+    if (v.viewType === 'sql') {
+      body = String(v.sql).replace(/[\s;]+$/, '');
+    } else if (v.viewType === 'function') {
+      body = 'SELECT * FROM ' + v.function.name + '(' + v.function.args.join(', ') + ')';
+    } else {
+      body = 'SELECT ' + v.columns.map(function (c) { return qualified(c.expr) + ' AS ' + q(c.name); }).join(', ') +
+        '\nFROM ' + qt(v.from.schema, v.from.table) + ' ' + q(v.from.alias);
+      v.joins.forEach(function (j) {
+        body += '\n' + j.type + ' JOIN ' + qt(j.schema, j.table) + ' ' + q(j.alias) + ' ON ' +
+          j.on.map(function (o) { return qualified(o.left) + ' = ' + qualified(o.right); }).join(' AND ');
+      });
+      if (v.where) body += '\nWHERE ' + v.where;
+    }
+    if (drop) push('DROP VIEW IF EXISTS ' + name + ';');
+    go();
+    push('CREATE OR ALTER VIEW ' + name + ' AS\n' + body + ';');
+    go();
+    if (v.comment) {
+      push('EXEC sp_addextendedproperty @name = N\'MS_Description\', @value = ' + lit(v.comment) +
+        ', @level0type = N\'SCHEMA\', @level0name = ' + lit(schemaOf(v.schema)) + ', @level1type = N\'VIEW\', @level1name = ' + lit(v.physicalName) + ';');
+    }
+    push(v.postQuery);
+    m.methods.forEach(function (f) {
+      if (definable(f) && f.afterViewId === v.id) emitFunction(f);
+    });
+  });
+
+  // 8. トリガー(CREATE TRIGGER はバッチの先頭。文単位)
+  m.tables.forEach(function (t) {
+    t.triggers.forEach(function (g) {
+      if (g.timing === 'BEFORE') note(g.name + ': BEFORE は SQL Server にないため、AFTER トリガーにしました');
+      if (g.forEach === 'ROW') note(g.name + ': SQL Server のトリガーは文単位です(行単位の指定は無視)。本体で inserted / deleted を使ってください');
+      if (g.when) note(g.name + ': WHEN(' + g.when + ') は出力しません。本体で IF を使ってください');
+      if (g.updateColumns.length > 0) note(g.name + ': UPDATE OF は出力しません。本体で UPDATE(列) を使ってください');
+      if (drop) push('DROP TRIGGER IF EXISTS ' + qt(t.schema, g.name) + ';');
+      go();
+      push('CREATE OR ALTER TRIGGER ' + qt(t.schema, g.name) + ' ON ' + qt(t.schema, t.physicalName) + '\nAFTER ' +
+        g.events.join(', ') + '\nAS\n' + endSemi(g.body));
+      go();
+    });
+  });
+
+  // 9. 終了クエリ
+  push(m.model.endQuery);
+
+  return out.join('\n\n') + '\n';
+}

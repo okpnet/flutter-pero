@@ -1,0 +1,178 @@
+// @post name=MySQL targetDb=mysql apiVersion=2
+//
+// PERO 同梱のポストファイル(MySQL 8.0用)。生成用JSON(apiVersion 2)からSQLを作る。
+// 出力順: 開始クエリ → スキーマ(CREATE DATABASE) → ファンクション → テーブル(依存するファンクションを直後に)
+//         → 外部キー → ビュー → トリガー → 終了クエリ
+//
+// MySQLで表せないものの扱い:
+//   ユーザー定義型(CREATE TYPE)      : 出力しない(コメントで残す)。列の型は型の物理名テンプレート(mysql)に従う。
+//   NULLS NOT DISTINCT / DEFERRABLE  : 出力しない(コメントで残す)。
+//   ON DELETE / ON UPDATE SET DEFAULT: 出力しない(コメントで残す。MySQLは受理するがInnoDBでは動作しない)。
+//   トリガーのWHEN                    : 出力しない(コメントで残す)。本体で IF を使う。
+//   トリガーの複数イベント             : イベントごとに別のトリガーにする(名前の末尾に _insert / _update / _delete)。
+//   トリガーのUPDATE OF               : 出力しない(コメントで残す)。UPDATEの全列が対象になる。
+//   STATEMENT単位のトリガー            : 出力しない(コメントで残す)。MySQLのトリガーは FOR EACH ROW のみ。
+//   AFTER/BEFORE以外                   : なし。
+//
+// トリガーの本体の規約:
+//   本体は「CREATE TRIGGER 文の本体(FOR EACH ROW の後ろ。単文、または BEGIN ... END)」。
+//   公開(public)のメソッド、入力(inline)のどちらも同じ。`{{table}}`、`{{trigger}}` は置換済み。
+//   複数イベントのときは、同じ本体をイベントごとのトリガーに使う。
+function main(jsonText) {
+  var m = JSON.parse(jsonText);
+  var out = [];
+
+  function q(name) { return '`' + String(name).replace(/`/g, '``') + '`'; }
+  function lit(s) { return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "''") + "'"; }
+  // MySQLではスキーマ = データベース。
+  function qt(schema, name) { return schema ? q(schema) + '.' + q(name) : q(name); }
+  var drop = m.model.dropBeforeCreate === true;
+  function list(names) { return names.map(q).join(', '); }
+  function endSemi(s) {
+    var t = s.replace(/\s+$/, '');
+    return /;$/.test(t) ? t : t + ';';
+  }
+  function push(s) { if (s !== null && s !== undefined && String(s).replace(/\s+/g, '') !== '') out.push(String(s).replace(/\s+$/, '')); }
+  function note(s) { push('-- [PERO] ' + s); }
+
+  function defaultText(c) {
+    var d = c.default;
+    if (d.kind === 'method') {
+      // 式のデフォルトは括弧で囲む(MySQL 8.0.13以降)。単純な関数呼出し(CURRENT_TIMESTAMP など)は、そのまま。
+      return /^[A-Za-z_][A-Za-z0-9_]*(\(\))?$/.test(d.call) && d.call.toUpperCase().indexOf('CURRENT_') === 0 ? d.call : '(' + d.call + ')';
+    }
+    if (d.kind === 'expression') {
+      // 括弧で囲まれた式と、CURRENT_DATE などの単独のキーワードは、そのまま。ほかは括弧で囲む(MySQL 8.0.13以降)。
+      return /^\(.*\)$/.test(d.expression) || /^CURRENT_(DATE|TIME|TIMESTAMP)(\(\d*\))?$/i.test(d.expression) ? d.expression : '(' + d.expression + ')';
+    }
+    if (d.kind !== 'value') return null;
+    switch (c.typeCategory) {
+      case 'number':
+      case 'auto':
+        return d.value;
+      case 'boolean':
+        return /^(true|1)$/i.test(d.value) ? '1' : (/^(false|0)$/i.test(d.value) ? '0' : d.value);
+      default:
+        return lit(d.value);
+    }
+  }
+
+  function unset(x) { return x === null || x === undefined; }
+  function definable(f) { return f.kind === 'function' && !f.external && f.body.replace(/\s+/g, '') !== ''; }
+  function emitFunction(f) {
+    // MySQLのストアドファンクションは DELIMITER が必要なクライアントがあるため、本体のとおりに出力する。
+    push(endSemi(f.body));
+  }
+
+  // 1. 開始クエリ
+  push(m.model.startQuery);
+
+  // 2. スキーマ(データベース)
+  (m.schemas || []).forEach(function (s) { push('CREATE DATABASE IF NOT EXISTS ' + q(s) + ' DEFAULT CHARACTER SET utf8mb4;'); });
+
+  // 3. ユーザー定義型は、MySQLにないため出力しない
+  m.userTypes.forEach(function (t) { note('ユーザー定義型 ' + t.name + ' は MySQL にないため出力しません'); });
+
+  // 4. ファンクション(依存テーブルのないもの)
+  m.methods.forEach(function (f) {
+    if (definable(f) && unset(f.afterTableId) && unset(f.afterViewId)) emitFunction(f);
+  });
+
+  // 5. テーブル(依存順)
+  m.tables.forEach(function (t) {
+    var name = qt(t.schema, t.physicalName);
+    push(t.preQuery);
+    if (drop) push('DROP TABLE IF EXISTS ' + name + ';');
+    var lines = t.columns.map(function (c) {
+      var s = '  ' + q(c.physicalName) + ' ' + c.type;
+      if (c.notNull) s += ' NOT NULL';
+      var d = defaultText(c);
+      if (d !== null && d !== '') s += ' DEFAULT ' + d;
+      if (c.comment) s += ' COMMENT ' + lit(c.comment);
+      return s;
+    });
+    if (t.primaryKey) {
+      lines.push('  CONSTRAINT ' + q(t.primaryKey.name) + ' PRIMARY KEY (' + list(t.primaryKey.columns) + ')');
+    }
+    t.checks.forEach(function (k) {
+      lines.push('  CONSTRAINT ' + q(k.name) + ' CHECK (' + k.expression + ')');
+    });
+    push('CREATE TABLE ' + name + ' (\n' + lines.join(',\n') + '\n)' + (t.comment ? ' COMMENT=' + lit(t.comment) : '') + ';');
+    t.indexes.forEach(function (i) {
+      push('CREATE INDEX ' + q(i.name) + ' ON ' + name + ' (' + list(i.columns) + ');');
+    });
+    t.uniques.forEach(function (u) {
+      if (u.nullsNotDistinct) note(u.name + ': NULLS NOT DISTINCT は MySQL にないため、通常のUNIQUEにしました');
+      push('ALTER TABLE ' + name + ' ADD CONSTRAINT ' + q(u.name) + ' UNIQUE (' + list(u.columns) + ');');
+    });
+    push(t.postQuery);
+    m.methods.forEach(function (f) {
+      if (definable(f) && f.afterTableId === t.id) emitFunction(f);
+    });
+  });
+
+  // 6. 外部キー(すべてのテーブルの作成後)
+  m.foreignKeys.forEach(function (f) {
+    var s = 'ALTER TABLE ' + qt(f.childSchema, f.childTable) + ' ADD CONSTRAINT ' + q(f.name) +
+      ' FOREIGN KEY (' + list(f.columns.map(function (c) { return c.child; })) + ')' +
+      ' REFERENCES ' + qt(f.parentSchema, f.parentTable) + ' (' + list(f.columns.map(function (c) { return c.parent; })) + ')';
+    if (f.onDelete === 'SET DEFAULT' || f.onUpdate === 'SET DEFAULT') note(f.name + ': SET DEFAULT は出力しません');
+    if (f.onDelete && f.onDelete !== 'SET DEFAULT') s += ' ON DELETE ' + f.onDelete;
+    if (f.onUpdate && f.onUpdate !== 'SET DEFAULT') s += ' ON UPDATE ' + f.onUpdate;
+    if (f.deferrable) note(f.name + ': ' + f.deferrable + ' は MySQL にないため出力しません');
+    push(s + ';');
+  });
+
+  // 7. ビュー
+  function qualified(expr) {
+    var i = expr.indexOf('.');
+    return i < 0 ? q(expr) : q(expr.substring(0, i)) + '.' + q(expr.substring(i + 1));
+  }
+  m.views.forEach(function (v) {
+    var name = qt(v.schema, v.physicalName);
+    push(v.preQuery);
+    var body;
+    if (v.viewType === 'sql') {
+      body = String(v.sql).replace(/[\s;]+$/, '');
+    } else if (v.viewType === 'function') {
+      // MySQLにはテーブル値関数がないため、関数の呼出し式をそのままSELECTする。
+      body = 'SELECT ' + v.function.name + '(' + v.function.args.join(', ') + ') AS ' + q(v.function.columns.length > 0 ? v.function.columns[0].name : 'value');
+    } else {
+      body = 'SELECT ' + v.columns.map(function (c) { return qualified(c.expr) + ' AS ' + q(c.name); }).join(', ') +
+        '\nFROM ' + qt(v.from.schema, v.from.table) + ' ' + q(v.from.alias);
+      v.joins.forEach(function (j) {
+        // MySQLにFULL JOINはない。
+        if (j.type === 'FULL') note(v.physicalName + ': FULL JOIN は MySQL にないため、LEFT JOIN にしました');
+        body += '\n' + (j.type === 'FULL' ? 'LEFT' : j.type) + ' JOIN ' + qt(j.schema, j.table) + ' ' + q(j.alias) + ' ON ' +
+          j.on.map(function (o) { return qualified(o.left) + ' = ' + qualified(o.right); }).join(' AND ');
+      });
+      if (v.where) body += '\nWHERE ' + v.where;
+    }
+    if (drop) push('DROP VIEW IF EXISTS ' + name + ';');
+    push('CREATE OR REPLACE VIEW ' + name + ' AS\n' + body + ';');
+    push(v.postQuery);
+    m.methods.forEach(function (f) {
+      if (definable(f) && f.afterViewId === v.id) emitFunction(f);
+    });
+  });
+
+  // 8. トリガー(イベントごとに1つ)
+  m.tables.forEach(function (t) {
+    t.triggers.forEach(function (g) {
+      if (g.forEach === 'STATEMENT') { note(g.name + ': STATEMENT単位のトリガーは MySQL にないため出力しません'); return; }
+      if (g.when) note(g.name + ': WHEN(' + g.when + ') は MySQL にないため出力しません。本体で IF を使ってください');
+      if (g.updateColumns.length > 0) note(g.name + ': UPDATE OF は MySQL にないため、UPDATEの全列が対象になります');
+      g.events.forEach(function (e) {
+        var name = g.events.length > 1 ? g.name + '_' + e.toLowerCase() : g.name;
+        if (drop) push('DROP TRIGGER IF EXISTS ' + qt(t.schema, name) + ';');
+        push('CREATE TRIGGER ' + qt(t.schema, name) + ' ' + g.timing + ' ' + e + ' ON ' + qt(t.schema, t.physicalName) +
+          ' FOR EACH ROW\n' + endSemi(g.body));
+      });
+    });
+  });
+
+  // 9. 終了クエリ
+  push(m.model.endQuery);
+
+  return out.join('\n\n') + '\n';
+}
