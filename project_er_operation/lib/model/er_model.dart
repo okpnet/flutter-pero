@@ -62,7 +62,7 @@ class ErModel {
   ErModel({
     required this.id,
     this.nextId = 1,
-    this.appVersion = '0.4.0',
+    this.appVersion = '0.4.1',
     ModelProperties? properties,
     List<DataType>? types,
     List<MethodDef>? methods,

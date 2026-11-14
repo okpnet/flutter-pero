@@ -76,6 +76,9 @@ class SqlImportConverter {
   final Map<String, TableEntity> _tables = {};
   final Map<String, ViewEntity> _views = {};
   final Map<String, MethodDef> _methods = {};
+
+  /// 関数ごとの、CREATE FUNCTION の引数の定義(COMMENT ON FUNCTION が引数を省略したときに使う)。
+  final Map<String, String> _declaredArgs = {};
   final Map<String, DataType> _userTypes = {};
   final Map<String, DataType> _customTypes = {};
   final Map<String, MethodDef> _defaultMethods = {};
@@ -611,6 +614,7 @@ class SqlImportConverter {
       bodies: {for (final d in DbKind.values) d: d == _dialect ? '${f['body'] ?? ''}' : ''},
     );
     _methods[_lower(name)] = m;
+    _declaredArgs[_lower(name)] = '${f['args'] ?? ''}';
     model.methods.add(m);
     report.methods++;
   }
@@ -720,13 +724,47 @@ class SqlImportConverter {
         final fn = _methods[name];
         if (fn == null) return;
         fn.comment = text;
-        fn.args = open < 0 ? '' : target.substring(open + 1, target.lastIndexOf(')'));
+        // 引数の指定が無い COMMENT ON FUNCTION 名前 は、CREATE FUNCTION の引数(既定値と OUT を除く)を使う。
+        fn.args = open < 0 ? _commentArgs(_declaredArgs[name] ?? '') : target.substring(open + 1, target.lastIndexOf(')'));
       case 'type':
         final t = _userTypes[_parts(target).last];
         if (t != null) t.comment = text;
       default:
         _skip('COMMENT ON ${kind.toUpperCase()}', '置き場がないため取り込まない: $target');
     }
+  }
+
+  /// CREATE FUNCTION の引数の定義から、COMMENT ON FUNCTION の引数(既定値と OUT 引数を除く)を作る。
+  String _commentArgs(String declared) {
+    final parts = <String>[];
+    var depth = 0;
+    var quote = '';
+    var start = 0;
+    for (var i = 0; i < declared.length; i++) {
+      final c = declared[i];
+      if (quote.isNotEmpty) {
+        if (c == quote) quote = '';
+      } else if (c == "'" || c == '"') {
+        quote = c;
+      } else if (c == '(') {
+        depth++;
+      } else if (c == ')') {
+        depth--;
+      } else if (c == ',' && depth == 0) {
+        parts.add(declared.substring(start, i));
+        start = i + 1;
+      }
+    }
+    parts.add(declared.substring(start));
+    final out = <String>[];
+    for (final p in parts) {
+      var t = p.trim();
+      if (t.isEmpty || RegExp(r'^out\s', caseSensitive: false).hasMatch(t)) continue;
+      t = t.replaceFirst(RegExp(r'\s+default\s[\s\S]*$', caseSensitive: false), '');
+      t = t.replaceFirst(RegExp(r'\s*=\s[\s\S]*$'), '');
+      out.add(t.trim());
+    }
+    return out.join(', ');
   }
 
   // ---------- 仕上げ
@@ -738,9 +776,10 @@ class SqlImportConverter {
           .allMatches((fn.bodies[_dialect] ?? '').toLowerCase())
           .map((x) => x.group(0)!)
           .toSet();
+      // 依存先は、今回取り込んだものだけでなく、取込先のモデルにあるテーブル・ビューも対象にする
+      // (追加のとき、戻り値の表などが既にモデルにある)。
       fn.dependsOnTableIds = [
-        for (final t in _tables.values) if (words.contains(_lower(t.physicalName))) t.id,
-        for (final v in _views.values) if (words.contains(_lower(v.physicalName))) v.id,
+        for (final e in model.entities) if (words.contains(_lower(e.physicalName))) e.id,
       ];
     }
   }

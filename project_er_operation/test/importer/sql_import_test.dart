@@ -164,4 +164,23 @@ void main() {
     expect(((data['views'] as List).single as Map)['name'], 'import_01');
     expect(((data['unparsed'] as List).single as Map)['kind'], 'INSERT');
   });
+
+  test('追加取り込み: 戻り値の表が既にモデルにあるときも、関数の依存先になり、表の後に出力される', () async {
+    final model = ErModel.empty(postPath: '');
+    final did = model.diagrams.first.id;
+    CommandContext ctx() => CommandContext(model, () => EntityLayouter(model));
+    final base = await runPost([const SqlImportFile(name: 't.sql', text: 'CREATE TABLE chg (id integer PRIMARY KEY, q integer);')]);
+    ImportSqlCommand(diagramId: did, data: base).apply(ctx());
+    const fn = 'CREATE OR REPLACE FUNCTION f(p_a integer, p_b integer DEFAULT NULL, OUT o integer) RETURNS chg AS \$\$ SELECT * FROM chg; \$\$ LANGUAGE sql;\n'
+        "COMMENT ON FUNCTION f IS '@omit';";
+    final data = await runPost([const SqlImportFile(name: 'f.sql', text: fn)]);
+    ImportSqlCommand(diagramId: did, data: data).apply(ctx());
+    final f = model.methods.firstWhere((m) => m.name == 'f');
+    expect(f.dependsOnTableIds, [model.tables.single.id]);
+    // 引数を省略した COMMENT ON FUNCTION は、CREATE FUNCTION の引数(既定値と OUT を除く)になる
+    expect(f.args, 'p_a integer, p_b integer');
+    final sql = await generateSql(model);
+    expect(sql.indexOf('CREATE TABLE chg'), lessThan(sql.indexOf('FUNCTION f(')));
+    expect(sql, contains('COMMENT ON FUNCTION f(p_a integer, p_b integer) IS'));
+  });
 }
