@@ -3,6 +3,7 @@ import 'clipboard_commands.dart';
 import 'column_commands.dart';
 import 'command_base.dart';
 import 'entity_commands.dart';
+import 'import_commands.dart';
 import 'model_commands.dart';
 import 'relationship_commands.dart';
 
@@ -96,6 +97,11 @@ ModelCommand commandFromJson(Map<String, Object?> json) {
       return DeleteTypeCommand(a['typeId'] as String, a['replacementId'] as String?);
     case 'deleteMethod':
       return DeleteMethodCommand(a['methodId'] as int);
+    case 'importSql':
+      return ImportSqlCommand(
+          diagramId: a['diagramId'] as int,
+          data: _m(a['data']),
+          spacing: (a['spacing'] as num?)?.toDouble() ?? 40);
     case 'pasteEntities':
       return PasteEntitiesCommand(
           diagramId: a['diagramId'] as int,

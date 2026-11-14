@@ -2,7 +2,7 @@
 
 ER図作成アプリ(Windows 10/11、Flutter)。概要と使い方は、リポジトリのルートの [README](../README.md) と [使い方](doc/contents/使い方.md)、仕様は [CLAUDE.md](CLAUDE.md) を見てください。
 
-現在のバージョン: **0.3.1**
+現在のバージョン: **0.4.0**
 
 ## 開発
 

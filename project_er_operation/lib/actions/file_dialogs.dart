@@ -26,6 +26,20 @@ class FileDialogs {
     return f?.path;
   }
 
+  /// 既存のファイルを複数選ぶ。キャンセルは空のリスト。
+  Future<List<String>> pickOpenMany({
+    required String title,
+    required List<String> extensions,
+    String? initialDirectory,
+  }) async {
+    final files = await openFiles(
+      acceptedTypeGroups: [XTypeGroup(label: extensions.join(', '), extensions: extensions)],
+      initialDirectory: initialDirectory,
+      confirmButtonText: '開く',
+    );
+    return [for (final f in files) f.path];
+  }
+
   /// 保存先を選び、[bytes] を原子的に書き込んで、保存したパスを返す。キャンセルはnull。
   /// 拡張子が付いていなければ [extension](ドットなし)を付ける。
   /// 既存のファイルを選んだときの上書きの確認は、OSのダイアログが行う。書込みの失敗は [FileSystemException]。

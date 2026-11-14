@@ -29,6 +29,10 @@ PERO は「ER図(ER)」を「ペロッと(PERO)」SQL にしてしまう、く�
 **出力する**
 - ポストファイル(`*.post`、JavaScript)で SQL への変換を差し替えられます。同梱は **PostgreSQL / MySQL 8.0 / SQL Server**。自分の方言用に書くこともできます。
 - ポストファイルのメタ情報から対象 DB が決まり、画面もその DB の分だけ表示されます(使わない DB のタブは出ません)。
+- 共通ヘルパ(`pero.lib.js`)とひな形(`post/template`)、書き方のガイド([ポストファイルの書き方](project_er_operation/doc/contents/ポストファイルの書き方.md))で、自分のデータベース用のポストファイルを書きやすくしています。
+
+**取り込む**
+- ファイル > **SQLインポート**で、SQL(DDL)からテーブル・関数・ビュー・トリガーなどを取り込めます(新しいモデル、または現在のモデルへ追加)。解析はインポート用のポストファイルが行います(同梱は PostgreSQL)。コマンドではない SELECT は `import_01` のようなビューになり、INSERT / UPDATE など解析できないものはログに残して、別ファイルへ保存できます。
 
 **守る**
 - 保存は一時ファイル経由(途中で失敗しても元のファイルは無事)。異常終了しても、編集内容をキャッシュから復元できます。定期バックアップつき。
@@ -87,7 +91,7 @@ flutter build windows --debug
 ```text
 project_er_operation/
 ├─ lib/        model / command / persistence / generation(純Dart)と、UI(canvas / panel / dialog / app ...)
-├─ post/       同梱のポストファイル(postgresql / mysql / sqlserver)
+├─ post/       同梱のポストファイル(postgresql / mysql / sqlserver、インポート用、共通ヘルパ、ひな形)
 ├─ test/       lib と同じ構成のテスト
 ├─ doc/        使い方(contents)とサンプルモデル(sample)
 ├─ tool/       SQL → .pero の取り込みツール

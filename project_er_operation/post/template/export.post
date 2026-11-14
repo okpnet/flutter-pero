@@ -1,0 +1,55 @@
+// @post name=私のデータベース(エクスポート) targetDb=postgresql apiVersion=3 role=export
+//
+// エクスポート用ポストファイルのひな形。
+//   1. このファイルをポストフォルダ(post)へコピーして、名前を変える(例: mydb.post)
+//   2. 1行目の name(表示名)と targetDb(postgresql / mysql / sqlserver / sqlite)を書き換える
+//   3. 下の「方言」と各関数を、対象のデータベースに合わせて書き換える
+// 入力は付録Bの生成用JSON、出力は生成するSQL全文(文字列)。使い方は doc/contents/ポストファイルの書き方.md。
+// 共通ヘルパ(pero.lib.js)の pero.dialect / pero.Output / pero.defaultSql を使っている。
+
+// ---- 方言: 識別子の引用と文字列リテラル ----
+var d = pero.dialect({
+  reserved: ['order', 'user', 'group', 'table'],              // 引用が必要な予約語(小文字)
+  quote: function (n) { return '"' + n.replace(/"/g, '""') + '"'; },   // 識別子の引用(MySQLなら `...`)
+  literal: function (s) { return "'" + s.replace(/'/g, "''") + "'"; }  // 文字列リテラル
+});
+
+function main(jsonText) {
+  var model = JSON.parse(jsonText);
+  var out = pero.Output();
+
+  out.push(model.model.startQuery);                  // 開始クエリ
+  model.tables.forEach(function (t) {                // tables は親から子の順
+    out.push(t.preQuery);
+    out.push(createTable(t));
+    out.push(t.postQuery);
+  });
+  model.foreignKeys.forEach(function (fk) { out.push(addForeignKey(fk)); });
+  out.push(model.model.endQuery);                    // 終了クエリ
+  return out.toString();
+}
+
+function createTable(t) {
+  var lines = t.columns.map(function (c) { return '  ' + columnDef(c); });
+  if (t.primaryKey) {
+    lines.push('  CONSTRAINT ' + d.q(t.primaryKey.name) + ' PRIMARY KEY (' + d.list(t.primaryKey.columns) + ')');
+  }
+  return 'CREATE TABLE ' + d.qt(t.schema, t.physicalName) + ' (\n' + lines.join(',\n') + '\n);';
+}
+
+function columnDef(c) {
+  var s = d.q(c.physicalName) + ' ' + c.type;
+  if (c.notNull) s += ' NOT NULL';
+  var def = pero.defaultSql(c, d);                   // デフォルトなしは null
+  if (def !== null) s += ' DEFAULT ' + def;
+  return s;
+}
+
+function addForeignKey(fk) {
+  var cols = fk.columns;
+  return 'ALTER TABLE ' + d.qt(fk.childSchema, fk.childTable) + '\n' +
+    '  ADD CONSTRAINT ' + d.q(fk.name) + ' FOREIGN KEY (' + d.list(cols.map(function (x) { return x.child; })) + ')\n' +
+    '  REFERENCES ' + d.qt(fk.parentSchema, fk.parentTable) + ' (' + d.list(cols.map(function (x) { return x.parent; })) + ')' +
+    (fk.onDelete ? ' ON DELETE ' + fk.onDelete : '') +
+    (fk.onUpdate ? ' ON UPDATE ' + fk.onUpdate : '') + ';';
+}

@@ -16,6 +16,7 @@ class JsPostRunner implements PostRunner {
     required String jsonText,
     required Duration timeout,
     void Function(String message)? onLog,
+    String? library,
   }) async {
     final result = ReceivePort();
     final errors = ReceivePort();
@@ -28,7 +29,7 @@ class JsPostRunner implements PostRunner {
     });
     final isolate = await Isolate.spawn<List<Object?>>(
       _entry,
-      [result.sendPort, _wrap(script, jsonText), timeout.inMilliseconds],
+      [result.sendPort, _wrap(script, jsonText, library), timeout.inMilliseconds],
       onError: errors.sendPort,
       errorsAreFatal: true,
     );
@@ -65,7 +66,7 @@ class JsPostRunner implements PostRunner {
   }
 
   /// 実行するJS。`main(jsonText)` を呼び、結果をJSON文字列で返す。
-  static String _wrap(String script, String jsonText) => '''
+  static String _wrap(String script, String jsonText, String? library) => '''
 (function () {
   var __logs = [];
   var console = { log: function () {
@@ -74,6 +75,8 @@ class JsPostRunner implements PostRunner {
   // ファイル、ネットワーク、タイマーは使えない(9.6-4)
   var setTimeout, setInterval, setImmediate, clearTimeout, clearInterval, fetch, XMLHttpRequest, sendMessage;
   try {
+${library ?? ''}
+    ;
 $script
     ;
     var __r = main(${jsonEncode(jsonText)});

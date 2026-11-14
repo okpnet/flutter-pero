@@ -27,6 +27,9 @@ class AppSettings {
   String postFile = 'postgresql.post';
   int postTimeoutSeconds = 30;
 
+  /// SQLインポートのポストファイルの実行タイムアウト(秒。9.11)。
+  int importTimeoutSeconds = 120;
+
   /// ポストファイルの種類(kind)の関連付け(ファイル名 → kind)。メタ情報の targetDb が既存のkindでない
   /// ユーザー作成のポストファイルを、既存のkindとして扱う(例: mariadb.post=mysql)。
   String postKindsText = '';
@@ -117,6 +120,7 @@ class AppSettings {
           'folder': postFolder,
           'file': postFile,
           'timeoutSeconds': postTimeoutSeconds,
+          'importTimeoutSeconds': importTimeoutSeconds,
           'kinds': postKindsText,
         },
         'generation': {
@@ -198,6 +202,7 @@ class AppSettings {
     s.postFolder = str(po, 'folder', s.postFolder);
     s.postFile = str(po, 'file', s.postFile);
     s.postTimeoutSeconds = i(po, 'timeoutSeconds', s.postTimeoutSeconds, 1, 300);
+    s.importTimeoutSeconds = i(po, 'importTimeoutSeconds', s.importTimeoutSeconds, 1, 900);
     s.postKindsText = str(po, 'kinds', s.postKindsText);
     final g = sec('generation');
     s.generatedExtension = str(g, 'extension', s.generatedExtension);

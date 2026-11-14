@@ -15,6 +15,7 @@ class Strings {
   static const fileSaveAs = 'ファイルに保存';
   static const fileRecent = '最近使ったファイル';
   static const fileSettings = '設定';
+  static const fileImportSql = 'SQLインポート';
   static const fileExit = '終了';
   static const opUndo = '元に戻す';
   static const opRedo = 'やり直し';
@@ -37,6 +38,9 @@ class Strings {
   static const showRightPane = 'プロパティを表示';
   static String loadingFile(String name) => '$name を読み込み中…';
   static const generating = '生成しています…';
+  static const importingSql = 'SQLを取り込んでいます…';
+  static const tabScrollLeft = 'タブを左へ';
+  static const tabScrollRight = 'タブを右へ';
   static const generateCanceled = '生成ファイルの保存を中止しました';
   static const autoLayoutNothing = '自動配置の対象がありません';
   static const autoLayoutFailed = '自動配置に失敗しました';

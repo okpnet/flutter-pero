@@ -14,6 +14,7 @@ class _CountingRunner implements PostRunner {
     required String jsonText,
     required Duration timeout,
     void Function(String message)? onLog,
+    String? library,
   }) async {
     calls++;
     json = jsonText;

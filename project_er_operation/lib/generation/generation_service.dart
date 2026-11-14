@@ -31,6 +31,7 @@ class GenerationService {
     PkNaming pkNaming = const PkNaming(),
     bool dropBeforeCreate = false,
     void Function(String)? onLog,
+    String? library,
   }) async {
     // 検証と生成用JSONの作成は、大きなモデルでは時間がかかるため、別Isolateで行う(画面を止めない)。
     // モデルなどを別Isolateへ渡せないときは、このIsolateで行う。
@@ -41,7 +42,7 @@ class GenerationService {
       prep = prepareGeneration(model, nameFormat, pkNaming, dropBeforeCreate);
     }
     if (prep.jsonText == null) return GenerationOutcome.invalid(prep.errors, prep.warnings);
-    final text = await runner.run(script: postScript, jsonText: prep.jsonText!, timeout: timeout, onLog: onLog);
+    final text = await runner.run(script: postScript, jsonText: prep.jsonText!, timeout: timeout, onLog: onLog, library: library);
     return GenerationOutcome.ok(text, prep.warnings);
   }
 }

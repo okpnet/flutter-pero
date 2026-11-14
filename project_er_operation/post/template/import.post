@@ -1,0 +1,61 @@
+// @post name=私のデータベース(インポート) targetDb=postgresql apiVersion=3 role=import
+//
+// インポート用ポストファイルのひな形。SQL(DDL)を読み、インポート結果(付録E)のJSONを返す。
+//   1. このファイルをポストフォルダ(post)へコピーして、名前を変える(例: mydb.import.post)
+//   2. 1行目の name(表示名)と targetDb を書き換える
+//   3. statement() の中を、対象のデータベースの文法に合わせて広げる
+// 入力: { "files": [ { "name": "a.sql", "text": "..." } ] }。使い方は doc/contents/ポストファイルの書き方.md。
+// 共通ヘルパ(pero.lib.js)の pero.splitSql / pero.splitTop / pero.parenBody / pero.ident / pero.ImportResult を使っている。
+//
+// 取り込めない文は res.unparsed(...) に渡す。アプリがログへ記録し、別ファイルへ保存できるようにする。
+// FROM句のある単独の SELECT は、res.nextViewName()(import_01, import_02 …)のビューにする。
+
+function main(inputText) {
+  var input = JSON.parse(inputText);
+  var res = pero.ImportResult('postgresql');       // 引数は方言(関数・トリガーの本体を入れる対象DB)
+
+  input.files.forEach(function (f) {
+    pero.splitSql(f.text).forEach(function (s) { statement(res, s, f.name); });
+  });
+  return res.toJson();
+}
+
+// 1つの文を、種類で振り分ける。s.raw はコメントを含む文、s.clean はコメントを除いた文、s.line は開始行。
+function statement(res, s, file) {
+  var head = s.clean.replace(/\s+/g, ' ').trim().toLowerCase();
+
+  if (/^create table /.test(head)) return createTable(res, s, file);
+
+  if (/^(select|with) /.test(head)) {
+    if (/\sfrom\s/.test(' ' + head + ' ')) {
+      res.add('views', { name: res.nextViewName(), schema: '', sql: s.raw.replace(/[\s;]+$/, ''), fromSelect: true, file: file, line: s.line });
+    } else {
+      res.unparsed('SELECT', 'FROM句のないSELECTは取り込まない', s, file);
+    }
+    return;
+  }
+
+  // 上のどれでもない文(INSERT / UPDATE を含む)は、解析できないものにする。
+  res.unparsed(head.split(' ')[0].toUpperCase(), '対象外の文', s, file);
+}
+
+// CREATE TABLE 名 ( 列 型 [NOT NULL] [DEFAULT 値], ... )
+function createTable(res, s, file) {
+  var m = /^\s*create\s+table\s+(?:if\s+not\s+exists\s+)?([\w."]+)/i.exec(s.clean);
+  var body = m && pero.parenBody(s.clean, m[0].length);
+  if (!body) return res.unparsed('CREATE TABLE', '解析できない', s, file);
+  var parts = pero.identParts(m[1]);
+  var table = { name: parts[parts.length - 1], schema: parts.length > 1 ? parts[0] : '', file: file, line: s.line, columns: [] };
+  pero.splitTop(body.body).forEach(function (item) {
+    var c = /^("[^"]+"|\w+)\s+(\w+(?:\s*\([^)]*\))?)(.*)$/i.exec(item);
+    if (!c) return res.unparsed('CREATE TABLE(列)', table.name + ': ' + item, s, file);
+    table.columns.push({
+      name: pero.ident(c[1]),
+      type: c[2],                                   // 型の文字列。アプリがPERO標準型へ対応づける
+      notNull: /\bnot\s+null\b/i.test(c[3]),
+      primaryKey: /\bprimary\s+key\b/i.test(c[3]),
+      'default': (/\bdefault\s+(.+?)(?:\s+not\s+null|\s+null|$)/i.exec(c[3]) || [null, null])[1]
+    });
+  });
+  res.add('tables', table);
+}

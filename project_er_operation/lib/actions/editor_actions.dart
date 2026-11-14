@@ -12,6 +12,7 @@ import 'file_dialogs.dart';
 import '../common/common.dart';
 import '../dialog/dialog.dart';
 import '../generation/generation.dart';
+import '../importer/importer.dart';
 import '../model/model.dart';
 import '../persistence/persistence.dart';
 import '../runner/runner.dart';
@@ -115,6 +116,151 @@ class EditorActions implements CanvasHost {
           message: 'ファイルの不整合を修復しました。元のファイルは .bak に退避しました。',
           detail: r.repairs.summary());
     }
+  }
+
+  // ---- SQLインポート(9.11) ----
+
+  /// SQLインポート。ダイアログで、インポート用のポストファイル(データベース)、SQLファイル、取込先を選ぶ。
+  /// 取り込みの間は、オーバーレイとローディングで操作できなくする。
+  Future<void> importSql() async {
+    if (session.busyMessage.value != null) return;
+    final ctx = _ctx;
+    final imports = session.postCatalog.imports;
+    if (imports.isEmpty) {
+      await showMessageDialog(ctx,
+          title: Strings.error,
+          message: 'インポート用のポストファイルがありません。\n'
+              '先頭に「// @post name=… targetDb=… apiVersion=… role=import」を書いたポストファイルを、'
+              'ポストフォルダ(${session.postFolderPath()})に置いてください。');
+      return;
+    }
+    final dir = session.settings.lastFolder.isNotEmpty ? session.settings.lastFolder : await _documentsDir();
+    if (!ctx.mounted) return;
+    final opt = await showSqlImportDialog(
+      ctx,
+      imports: imports,
+      pickFiles: () => dialogs.pickOpenMany(title: Strings.fileImportSql, extensions: ['sql', 'txt'], initialDirectory: dir),
+    );
+    if (opt == null) return;
+    if (opt.newModel && !await confirmDiscard()) return;
+    if (session.busyMessage.value != null) return;
+    session.busyMessage.value = Strings.importingSql;
+    try {
+      await _importFlow(opt);
+    } finally {
+      session.busyMessage.value = null;
+    }
+  }
+
+  Future<void> _importFlow(SqlImportOptions opt) async {
+    final ctx = _ctx;
+    final logger = session.logger;
+    // SQLファイルを読む(UTF-8。BOMは除く)。
+    final files = <SqlImportFile>[];
+    for (final p in opt.files) {
+      try {
+        final text = utf8.decode(await File(p).readAsBytes(), allowMalformed: true);
+        files.add(SqlImportFile(name: p.substring(p.lastIndexOf(Platform.pathSeparator) + 1), text: text.startsWith('﻿') ? text.substring(1) : text));
+      } on FileSystemException catch (e, st) {
+        logger.error('SQLファイルを読めません: $p', e, st);
+        if (ctx.mounted) await _idleMessage(ctx, title: Strings.error, message: 'SQLファイルを読めません: $p\n${e.message}');
+        return;
+      }
+    }
+    // ポストファイルを、実行の間ロックする。
+    final LockedPostFile locked;
+    try {
+      locked = await LockedPostFile.acquire(opt.postPath);
+    } on PostFileException catch (e) {
+      logger.error('ポストファイルを開けません: ${opt.postPath} / ${e.message}');
+      if (ctx.mounted) await _idleMessage(ctx, title: Strings.error, message: e.message);
+      return;
+    }
+    final Map<String, Object?> data;
+    try {
+      final verr = checkPostApiVersion(parsePostMeta(locked.text));
+      if (verr != null) {
+        if (ctx.mounted) await _idleMessage(ctx, title: Strings.error, message: verr);
+        return;
+      }
+      data = await runImportPost(
+        JsPostRunner(),
+        script: locked.text,
+        files: files,
+        timeout: Duration(seconds: session.settings.importTimeoutSeconds),
+        library: loadPostLibrary(opt.postPath),
+        onLog: (m) => logger.info('[post] $m'),
+      );
+    } on PostException catch (e) {
+      logger.error('インポートのポストファイルの実行に失敗: ${e.message}\n${e.stack ?? ''}');
+      if (ctx.mounted) await _idleMessage(ctx, title: Strings.error, message: e.message, detail: e.stack);
+      return;
+    } finally {
+      await locked.release();
+    }
+    // モデルへ取り込む。
+    ImportReport? report;
+    try {
+      if (opt.newModel) {
+        final model = ErModel.empty(
+            typeTemplate: session.settings.typeTable,
+            pageSize: session.settings.paperSize,
+            orientation: session.settings.orientation,
+            postPath: session.defaultPostPath());
+        final cmd = ImportSqlCommand(
+            diagramId: model.diagrams.first.id, data: data, spacing: session.settings.alignSpace);
+        cmd.apply(CommandContext(model, () => EntityLayouter(model, session.settings.displayOptions)));
+        report = cmd.report;
+        session.openImported(model);
+      } else {
+        final cmd = ImportSqlCommand(
+            diagramId: session.diagram.id, data: data, spacing: session.settings.alignSpace);
+        if (session.run(cmd)) report = cmd.report;
+      }
+      await WidgetsBinding.instance.endOfFrame;
+    } on CommandException catch (e) {
+      logger.warn('SQLインポート: ${e.message}');
+      if (ctx.mounted) await _idleMessage(ctx, title: Strings.error, message: e.message);
+      return;
+    } on Object catch (e, st) {
+      logger.error('SQLインポートに失敗', e, st);
+      if (ctx.mounted) await _idleMessage(ctx, title: Strings.error, message: '取り込みに失敗しました: $e');
+      return;
+    }
+    if (report == null) {
+      if (ctx.mounted) await _idleMessage(ctx, title: Strings.error, message: session.statusMessage ?? '取り込めませんでした');
+      return;
+    }
+    logger.info('SQLインポート: ${report.summary}(取り込めなかったもの${report.unparsed.length}件)');
+    for (final u in report.unparsed) {
+      logger.warn('SQLインポート 取り込めない: ${u.summary}');
+      if (u.text.isNotEmpty) logger.debug('SQLインポート 取り込めない文:\n${u.text}');
+    }
+    for (final n in report.notes) {
+      logger.info('SQLインポート 補足: $n');
+    }
+    session.notify('SQLを取り込みました(${report.summary})');
+    if (!ctx.mounted) return;
+    final unparsed = report.unparsed;
+    _idle();
+    await showSqlImportResult(
+      ctx,
+      report: report,
+      saveUnparsed: () async {
+        try {
+          return await dialogs.saveBytes(
+            title: '取り込めなかった文を保存',
+            fileName: 'import_unparsed.sql',
+            bytes: Uint8List.fromList(utf8.encode(unparsedAsText(unparsed))),
+            extension: 'sql',
+            initialDirectory: await _outputDir(),
+          );
+        } on FileSystemException catch (e) {
+          if (ctx.mounted) await showMessageDialog(ctx, title: Strings.error, message: '書込みに失敗しました: ${e.message}');
+          return null;
+        }
+      },
+    );
   }
 
   /// 「ファイルに保存」。キャンセルは false。
@@ -694,6 +840,7 @@ class EditorActions implements CanvasHost {
         pkNaming: session.settings.pkNaming,
         dropBeforeCreate: session.settings.dropBeforeCreate,
         onLog: (m) => logger.info('[post] $m'),
+        library: loadPostLibrary(postPath),
       );
     } on PostException catch (e) {
       logger.error('ポストファイルの実行に失敗: ${e.message}\n${e.stack ?? ''}');

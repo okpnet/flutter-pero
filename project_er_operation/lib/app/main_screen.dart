@@ -78,6 +78,64 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
   // ---- 列ドラッグ中のタブ切替(3.4-9) ----
 
   final Map<int, GlobalKey> _tabKeys = {};
+
+  // ---- タブが画面に収まらないとき(3.2-5) ----
+
+  final ScrollController _tabScroll = ScrollController();
+  bool _tabOverflow = false;
+  bool _tabCanLeft = false;
+  bool _tabCanRight = false;
+  int? _lastTabId;
+
+  /// タブの表示範囲の状態を更新する。変化があったときだけ、描画の後に再構築する。
+  void _updateTabScroll(ScrollMetrics m) {
+    final over = m.maxScrollExtent > 0.5;
+    final left = m.pixels > 0.5;
+    final right = m.pixels < m.maxScrollExtent - 0.5;
+    if (over == _tabOverflow && left == _tabCanLeft && right == _tabCanRight) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _tabOverflow = over;
+        _tabCanLeft = left;
+        _tabCanRight = right;
+      });
+    });
+  }
+
+  /// タブの表示範囲を左右へ移動する([dir] は -1 か 1)。
+  void _scrollTabs(int dir) {
+    if (!_tabScroll.hasClients) return;
+    final p = _tabScroll.position;
+    final to = (p.pixels + dir * 240.0).clamp(0.0, p.maxScrollExtent);
+    _tabScroll.animateTo(to, duration: const Duration(milliseconds: 180), curve: Curves.easeOut);
+  }
+
+  /// 表示するダイアグラムが変わったとき、そのタブが見える位置までスクロールする。
+  void _revealCurrentTab() {
+    final id = s.diagram.id;
+    if (_lastTabId == id) return;
+    _lastTabId = id;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealTab(id, 0));
+  }
+
+  void _revealTab(int id, int attempt) {
+    if (!mounted || id != s.diagram.id) return;
+    final ctx = _tabKeys[id]?.currentContext;
+    if (ctx != null && ctx.mounted) {
+      Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 150));
+      return;
+    }
+    // 画面の外のタブはまだ作られていない(遅延構築)ので、位置を見積もって近づけ、次の描画でやり直す。
+    // 見積もりは、作られたタブが増えるほど正確になる。
+    if (attempt >= 8 || !_tabScroll.hasClients) return;
+    final n = s.model.diagrams.length;
+    final i = s.model.diagrams.indexWhere((d) => d.id == id);
+    if (n < 2 || i < 0) return;
+    _tabScroll.jumpTo(_tabScroll.position.maxScrollExtent * i / (n - 1));
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealTab(id, attempt + 1));
+  }
+
   Timer? _tabHoverTimer;
   int? _hoverTabId;
 
@@ -115,6 +173,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
     windowManager.removeListener(this);
     nameFocus.dispose();
     _searchController.dispose();
+    _tabScroll.dispose();
     super.dispose();
   }
 
@@ -663,6 +722,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
                   ),
               ],
             ),
+          mi(Strings.fileImportSql, actions.importSql),
           div,
           mi(Strings.fileSettings, actions.openSettings, key: const SingleActivator(LogicalKeyboardKey.comma, control: true)),
           div,
@@ -709,6 +769,7 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
 
   Widget _tabBar() {
     final m = s.model;
+    _revealCurrentTab();
     return SizedBox(
       height: 36,
       child: Row(children: [
@@ -718,21 +779,50 @@ class _MainScreenState extends State<MainScreen> with WindowListener {
           icon: Icon(s.settings.sideMenuOpen ? Icons.menu_open : Icons.menu, size: 18),
           onPressed: () => _togglePane(side: true),
         ),
+        if (_tabOverflow)
+          IconButton(
+            key: const ValueKey('tabScrollLeft'),
+            tooltip: Strings.tabScrollLeft,
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.arrow_left, size: 22),
+            onPressed: _tabCanLeft ? () => _scrollTabs(-1) : null,
+          ),
         Expanded(
-          child: ReorderableListView(
-            scrollDirection: Axis.horizontal,
-            buildDefaultDragHandles: false,
-            onReorderItem: (from, to) => s.run(MoveDiagramCommand(m.diagrams[from].id, to)),
-            children: [
-              for (var i = 0; i < m.diagrams.length; i++)
-                ReorderableDragStartListener(
-                  key: ValueKey('tab${m.diagrams[i].id}'),
-                  index: i,
-                  child: _tab(m.diagrams[i]),
-                ),
-            ],
+          child: NotificationListener<ScrollMetricsNotification>(
+            onNotification: (n) {
+              _updateTabScroll(n.metrics);
+              return false;
+            },
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (n) {
+                _updateTabScroll(n.metrics);
+                return false;
+              },
+              child: ReorderableListView(
+                scrollController: _tabScroll,
+                scrollDirection: Axis.horizontal,
+                buildDefaultDragHandles: false,
+                onReorderItem: (from, to) => s.run(MoveDiagramCommand(m.diagrams[from].id, to)),
+                children: [
+                  for (var i = 0; i < m.diagrams.length; i++)
+                    ReorderableDragStartListener(
+                      key: ValueKey('tab${m.diagrams[i].id}'),
+                      index: i,
+                      child: _tab(m.diagrams[i]),
+                    ),
+                ],
+              ),
+            ),
           ),
         ),
+        if (_tabOverflow)
+          IconButton(
+            key: const ValueKey('tabScrollRight'),
+            tooltip: Strings.tabScrollRight,
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.arrow_right, size: 22),
+            onPressed: _tabCanRight ? () => _scrollTabs(1) : null,
+          ),
         IconButton(tooltip: Strings.opAddDiagram, icon: const Icon(Icons.add, size: 18), onPressed: actions.addDiagram),
         IconButton(
           key: const ValueKey('toggleRightPane'),

@@ -123,6 +123,41 @@ void main() {
     expect(s.diagram.id, ids[1]);
   });
 
+  testWidgets('タブが画面に収まらないとき、両端の◀▶ボタンで表示範囲を移動する(収まるときは出ない。3.2-5)', (tester) async {
+    final s = await pump(tester);
+    expect(find.byKey(const ValueKey('tabScrollLeft')), findsNothing); // 収まっている
+    expect(find.byKey(const ValueKey('tabScrollRight')), findsNothing);
+    for (var i = 2; i <= 40; i++) {
+      s.model.diagrams.add(Diagram(id: s.model.allocateId(), name: '長めのダイアグラム名$i'));
+    }
+    s.notify(null);
+    await tester.pump();
+    await tester.pumpAndSettle();
+    final left = find.byKey(const ValueKey('tabScrollLeft'));
+    final right = find.byKey(const ValueKey('tabScrollRight'));
+    expect(left, findsOneWidget);
+    expect(right, findsOneWidget);
+    expect(tester.widget<IconButton>(left).onPressed, isNull); // 左端
+    expect(tester.widget<IconButton>(right).onPressed, isNotNull);
+    double offset() => tester
+        .state<ScrollableState>(find.descendant(of: find.byType(ReorderableListView), matching: find.byType(Scrollable)).first)
+        .position
+        .pixels;
+    await tester.tap(right);
+    await tester.pumpAndSettle();
+    expect(offset(), greaterThan(100)); // 表示範囲が動いた
+    expect(tester.widget<IconButton>(left).onPressed, isNotNull);
+    await tester.tap(left);
+    await tester.pumpAndSettle();
+    expect(offset(), closeTo(0, 1));
+    // 切り替えたタブが見える位置へスクロールする
+    final lastId = s.model.diagrams.last.id;
+    s.currentDiagramId = lastId;
+    await tester.pumpAndSettle();
+    final lastBox = tester.getRect(find.byKey(ValueKey('tab$lastId')));
+    expect(lastBox.right, lessThanOrEqualTo(1280));
+  });
+
   testWidgets('検索ボックスの↑↓ボタンで、ヒットしたオブジェクトへ移動する(循環)', (tester) async {
     final s = await pump(tester);
     expect(tester.widget<IconButton>(find.byKey(const ValueKey('searchNext'))).onPressed, isNull); // ヒットなし

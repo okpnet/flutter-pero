@@ -1,0 +1,256 @@
+// @post name=PostgreSQL(インポート) targetDb=postgresql apiVersion=3 role=import
+//
+// PERO 同梱のインポート用ポストファイル(PostgreSQL)。SQL(DDL)を読み、インポート結果(付録E)のJSONを返す。
+//   入力: JSON文字列 { "files": [ { "name": "01.sql", "text": "..." } ] }
+//   出力: インポート結果のJSON文字列
+// 取り込む: CREATE TABLE、ALTER TABLE(主キー・ユニーク・外部キー・CHECK)、CREATE [UNIQUE] INDEX、
+//   CREATE FUNCTION、CREATE TRIGGER、CREATE VIEW、CREATE TYPE(複合型・列挙型)、COMMENT ON。
+//   FROM句のある単独の SELECT は、ビュー(import_01 …)にする。
+// 取り込まない(解析できないものとして返す): INSERT / UPDATE / DELETE、DO、SET、DROP、GRANT など。
+// 共通ヘルパ(pero.lib.js)を使っている。
+
+function main(inputText) {
+  var input = JSON.parse(inputText);
+  var res = pero.ImportResult('postgresql');
+
+  input.files.forEach(function (f) {
+    pero.splitSql(f.text).forEach(function (s) { statement(res, s, f.name); });
+  });
+  return res.toJson();
+}
+
+// ----------------------------------------------------------------------------- 文の振り分け
+
+function head(s) {
+  var h = s.clean.replace(/\s+/g, ' ').trim();
+  return h;
+}
+
+function statement(res, s, file) {
+  var h = head(s);
+  var l = h.length > 200 ? h.substring(0, 200).toLowerCase() : h.toLowerCase();
+  var m;
+  function skip(kind, reason) { res.unparsed(kind, reason, s, file); }
+
+  if (/^create (or replace )?function /.test(l)) return createFunction(res, s, file, h);
+  if (/^create (temp |temporary )/.test(l)) return skip('CREATE TEMP TABLE', '一時テーブルは取り込まない');
+  if (/^create (unlogged )?table /.test(l)) return createTable(res, s, file);
+  if (/^create (or replace )?(temp |temporary |recursive )?(materialized )?view /.test(l)) return createView(res, s, file);
+  if (/^create (unique )?index /.test(l)) return createIndex(res, s, file, h);
+  if (/^create (or replace )?(constraint )?trigger /.test(l)) return createTrigger(res, s, file, h);
+  if (/^create type /.test(l)) return createType(res, s, file);
+  if (/^alter table /.test(l)) return alterTable(res, s, file, h);
+  if (/^comment on /.test(l)) return commentOn(res, s, file);
+  if ((m = /^(select|with) /.exec(l))) return selectStatement(res, s, file, h);
+  var words = l.split(' ');
+  var kind = words.slice(0, (words[0] === 'create' || words[0] === 'drop' || words[0] === 'comment' || words[0] === 'alter') ? 3 : 1).join(' ').toUpperCase();
+  var reason = /^(insert|update|delete)$/.test(words[0]) ? 'データの操作(' + words[0].toUpperCase() + ')は取り込まない' : '対象外の文';
+  skip(kind, reason);
+}
+
+// ----------------------------------------------------------------------------- SELECT → ビュー
+
+function selectStatement(res, s, file, h) {
+  // FROM句のあるSELECTだけをビューにする。FROMのないSELECT(関数呼出し、定数)はコマンドとみなして取り込まない。
+  if (!/\sfrom\s/i.test(' ' + h + ' ')) {
+    res.unparsed('SELECT', 'FROM句のないSELECT(関数呼出しなど)は取り込まない', s, file);
+    return;
+  }
+  res.add('views', {
+    name: res.nextViewName(), schema: '', sql: s.raw.replace(/[\s;]+$/, ''), replace: false,
+    fromSelect: true, file: file, line: s.line
+  });
+}
+
+// ----------------------------------------------------------------------------- CREATE TABLE
+
+function createTable(res, s, file) {
+  var m = /^\s*create\s+(?:unlogged\s+)?table\s+(?:if\s+not\s+exists\s+)?([\w."]+)/i.exec(s.clean);
+  if (!m) return res.unparsed('CREATE TABLE', '解析できない', s, file);
+  var parts = pero.identParts(m[1]);
+  var name = parts[parts.length - 1];
+  var schema = parts.length > 1 ? parts[parts.length - 2] : '';
+  var body = pero.parenBody(s.clean, m[0].length);
+  if (!body) return res.unparsed('CREATE TABLE', '列の定義が見つからない', s, file);
+  var table = { name: name, schema: schema, file: file, line: s.line, columns: [] };
+  var tail = s.clean.substring(body.end).replace(/^\s+|\s+$/g, '');
+  if (tail) res.unparsed('CREATE TABLE(末尾句)', name + ': ' + tail, s, file);
+  pero.splitTop(body.body).forEach(function (item) {
+    if (/^(constraint|primary|unique|foreign|check|exclude|like)\b/i.test(item)) {
+      var con = tableConstraint(name, item);
+      if (con) { con.file = file; con.line = s.line; res.add('constraints', con); }
+      else res.unparsed('CREATE TABLE(制約句)', name + ': ' + item, s, file);
+      return;
+    }
+    var col = column(item);
+    if (col) table.columns.push(col);
+    else res.unparsed('CREATE TABLE(列)', name + ': ' + item, s, file);
+  });
+  res.add('tables', table);
+}
+
+function column(item) {
+  var m = /^("[^"]+"|\w+)\s+([\s\S]*)$/.exec(item);
+  if (!m) return null;
+  var name = pero.ident(m[1]);
+  var rest = m[2];
+  var kw = /\b(default|not\s+null|null|primary\s+key|references|check|unique|constraint|generated|collate)\b/i.exec(rest);
+  var type = (kw ? rest.substring(0, kw.index) : rest).trim();
+  var after = kw ? rest.substring(kw.index) : '';
+  var col = { name: name, type: type, notNull: /\bnot\s+null\b/i.test(after), 'default': null };
+  var d = /\bdefault\s+([\s\S]*?)(?=\s+(?:not\s+null|null|primary\s+key|references|check|unique|constraint)\b|$)/i.exec(after);
+  if (d) col['default'] = d[1].trim();
+  if (/\bprimary\s+key\b/i.test(after)) col.primaryKey = true;
+  if (/\bunique\b/i.test(after)) col.unique = true;
+  var ref = /\breferences\s+([\w."]+)\s*(?:\(([^)]*)\))?/i.exec(after);
+  if (ref) { col.references = { table: ref[1], columns: ref[2] || '' }; }
+  var ck = /\bcheck\s*(\(.*)$/i.exec(after);
+  if (ck) { var b = pero.parenBody(ck[1], 0); if (b) col.check = b.body.trim(); }
+  return col;
+}
+
+/** テーブル内の制約句(CONSTRAINT 名 ...、PRIMARY KEY (...) など)。 */
+function tableConstraint(table, item) {
+  var name = '';
+  var m = /^constraint\s+("[^"]+"|\w+)\s+([\s\S]*)$/i.exec(item);
+  var rest = item;
+  if (m) { name = pero.ident(m[1]); rest = m[2]; }
+  return constraintBody(table, name, rest);
+}
+
+/** 制約の本体(PRIMARY KEY / UNIQUE / FOREIGN KEY / CHECK)。解析できないときは null。 */
+function constraintBody(table, name, rest) {
+  var m;
+  if ((m = /^primary\s+key\s*\(([^)]*)\)/i.exec(rest))) {
+    return { kind: 'primaryKey', table: table, name: name, columns: cols(m[1]) };
+  }
+  if ((m = /^unique\s*(nulls\s+not\s+distinct)?\s*\(([^)]*)\)\s*$/i.exec(rest))) {
+    return { kind: 'unique', table: table, name: name, columns: cols(m[2]), nullsNotDistinct: !!m[1] };
+  }
+  if ((m = /^foreign\s+key\s*\(([^)]*)\)\s*references\s+([\w."]+)\s*\(([^)]*)\)([\s\S]*)$/i.exec(rest))) {
+    var tail = m[4].toLowerCase();
+    function action(kind) {
+      var a = new RegExp('on ' + kind + ' (no action|restrict|cascade|set null|set default)').exec(tail);
+      return a ? a[1] : '';
+    }
+    var def = '';
+    if (/(^|\s)not\s+deferrable/.test(tail)) def = '';
+    else if (/deferrable/.test(tail)) def = /initially\s+deferred/.test(tail) ? 'deferred' : 'immediate';
+    return {
+      kind: 'foreignKey', table: table, name: name, columns: cols(m[1]), refTable: m[2], refColumns: cols(m[3]),
+      onDelete: action('delete'), onUpdate: action('update'), deferrable: def
+    };
+  }
+  if ((m = /^check\s*(\([\s\S]*)$/i.exec(rest))) {
+    var b = pero.parenBody(m[1], 0);
+    if (b) return { kind: 'check', table: table, name: name, expression: b.body.trim() };
+  }
+  return null;
+}
+
+function cols(list) {
+  return pero.splitTop(list).map(function (c) { return pero.ident(c.split(/\s+/)[0]); });
+}
+
+// ----------------------------------------------------------------------------- ALTER TABLE
+
+function alterTable(res, s, file, h) {
+  var m = /^alter table (?:only )?(?:if exists )?([\w."]+) ([\s\S]*)$/i.exec(h);
+  if (!m) return res.unparsed('ALTER TABLE', '解析できない', s, file);
+  var table = pero.ident(m[1]);
+  var rest = m[2];
+  var a = /^add (?:constraint ("[^"]+"|\w+) )?([\s\S]*)$/i.exec(rest);
+  if (a) {
+    var con = constraintBody(table, a[1] ? pero.ident(a[1]) : '', a[2]);
+    if (con) { con.file = file; con.line = s.line; res.add('constraints', con); return; }
+  }
+  res.unparsed('ALTER TABLE', '未対応の変更: ' + rest.substring(0, 80), s, file);
+}
+
+// ----------------------------------------------------------------------------- INDEX
+
+function createIndex(res, s, file, h) {
+  var m = /^create (unique )?index (?:concurrently )?(?:if not exists )?([\w."]+) on (?:only )?([\w."]+)\s*(?:using (\w+))?\s*\(([\s\S]*)\)([\s\S]*)$/i.exec(h);
+  if (!m) return res.unparsed('CREATE INDEX', '解析できない', s, file);
+  var items = pero.splitTop(m[5]);
+  var simple = (!m[4] || m[4].toLowerCase() === 'btree') && !/\S/.test(m[6] || '') &&
+    items.every(function (p) { return /^("[^"]+"|\w+)(\s+(asc|desc))?$/i.test(p); });
+  if (!simple) return res.unparsed('CREATE INDEX', '式・部分・特殊なインデックスは取り込まない: ' + m[2], s, file);
+  res.add('constraints', {
+    kind: 'index', table: pero.ident(m[3]), name: pero.ident(m[2]), columns: cols(m[5]), unique: !!m[1],
+    file: file, line: s.line
+  });
+}
+
+// ----------------------------------------------------------------------------- TRIGGER
+
+function createTrigger(res, s, file, h) {
+  var m = /^create (?:or replace )?trigger ([\w"]+) (before|after|instead of) (.+?) on ([\w."]+)(.*?) execute (?:procedure|function) ([\w."]+)\s*\(\s*(.*)\)\s*$/i.exec(h);
+  if (!m) return res.unparsed('CREATE TRIGGER', '解析できない', s, file);
+  if (m[2].toLowerCase() === 'instead of') return res.unparsed('CREATE TRIGGER', 'INSTEAD OF は取り込まない', s, file);
+  var events = [];
+  var ok = true;
+  m[3].toLowerCase().split(' or ').forEach(function (e) {
+    e = e.trim();
+    var w = e.split(' ')[0];
+    if (w !== 'insert' && w !== 'update' && w !== 'delete') { ok = false; return; }
+    var ev = { event: w, columns: [] };
+    if (w === 'update' && /^update of /.test(e)) ev.columns = cols(e.substring('update of '.length));
+    events.push(ev);
+  });
+  if (!ok || events.length === 0) return res.unparsed('CREATE TRIGGER', '未対応のイベント', s, file);
+  var tail = m[5].trim();
+  var when = /when ?\((.*)\)\s*$/i.exec(tail);
+  res.add('triggers', {
+    name: pero.ident(m[1]), table: pero.ident(m[4]), timing: m[2].toLowerCase(), events: events,
+    forEach: /for each statement/i.test(tail) ? 'statement' : 'row', when: when ? when[1] : '',
+    'function': pero.ident(m[6]), args: m[7].trim(), file: file, line: s.line
+  });
+}
+
+// ----------------------------------------------------------------------------- FUNCTION
+
+function createFunction(res, s, file, h) {
+  var m = /^create (?:or replace )?function ([\w."]+)\s*\((.*?)\)\s*(?:returns\s+([\w."]+))?\s*(?:as|language|stable|volatile|immutable|security|cost|strict|called|returns)\b/i.exec(h);
+  if (!m) return res.unparsed('CREATE FUNCTION', '解析できない', s, file);
+  var parts = pero.identParts(m[1]);
+  res.add('functions', {
+    name: parts[parts.length - 1], schema: parts.length > 1 ? parts[parts.length - 2] : '',
+    args: m[2], returns: (m[3] || '').toLowerCase(), body: s.raw, file: file, line: s.line
+  });
+}
+
+// ----------------------------------------------------------------------------- VIEW / TYPE
+
+function createView(res, s, file) {
+  var m = /^\s*create\s+(?:or\s+replace\s+)?view\s+([\w."]+)\s+as\b/i.exec(s.raw);
+  if (!m) return res.unparsed('CREATE VIEW', '解析できない(列名の指定など)', s, file);
+  var parts = pero.identParts(m[1]);
+  res.add('views', {
+    name: parts[parts.length - 1], schema: parts.length > 1 ? parts[parts.length - 2] : '',
+    sql: s.raw.substring(m[0].length).replace(/[\s;]+$/, '').trim(), replace: /or\s+replace/i.test(m[0]),
+    fromSelect: false, file: file, line: s.line
+  });
+}
+
+function createType(res, s, file) {
+  var m = /^\s*create\s+type\s+([\w."]+)\s+as\s+(enum\s*)?\(([\s\S]*)\)\s*$/i.exec(s.clean);
+  if (!m) return res.unparsed('CREATE TYPE', '解析できない', s, file);
+  var parts = pero.identParts(m[1]);
+  var t = { name: parts[parts.length - 1], schema: parts.length > 1 ? parts[parts.length - 2] : '', kind: m[2] ? 'enum' : 'composite', fields: [], values: [], file: file, line: s.line };
+  pero.splitTop(m[3]).forEach(function (item) {
+    if (m[2]) { var v = pero.sqlString(item); if (v !== null) t.values.push(v); return; }
+    var f = /^("[^"]+"|\w+)\s+([\s\S]*)$/.exec(item);
+    if (f) t.fields.push({ name: pero.ident(f[1]), type: f[2].trim() });
+  });
+  res.add('types', t);
+}
+
+// ----------------------------------------------------------------------------- COMMENT ON
+
+function commentOn(res, s, file) {
+  var m = /^\s*comment\s+on\s+(\w+)\s+([\s\S]+?)\s+is\s+(e?'(?:[^']|'')*'|null)\s*$/i.exec(s.clean);
+  if (!m) return res.unparsed('COMMENT ON', '解析できない', s, file);
+  var text = pero.sqlString(m[3]);
+  res.add('comments', { kind: m[1].toLowerCase(), target: m[2], text: text === null ? '' : text });
+}

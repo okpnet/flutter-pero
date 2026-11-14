@@ -341,6 +341,12 @@ class EditorSession extends ChangeNotifier {
     notify(null);
   }
 
+  /// SQLインポートで作ったモデルを、無題の未保存の状態で開く(9.11)。
+  void openImported(ErModel m) {
+    cache.clear();
+    openRecovered(m, null);
+  }
+
   /// 保存。成功したら未保存状態を解除し、キャッシュの基点を更新する(4.1-3)。
   Future<SaveResult> save(String path) async {
     final r = await PeroFile.save(model, path);

@@ -77,10 +77,14 @@ class PostCatalog {
     }
   }
 
-  List<PostFileInfo> get valid => [for (final f in files) if (f.isValid) f];
+  /// 使えるエクスポート用(SQL生成)のポストファイル。
+  List<PostFileInfo> get valid => [for (final f in files) if (f.isValid && f.meta!.role == PostRole.export) f];
 
-  /// 使えるポストファイルが1つ以上あるか。
-  bool get hasValid => files.any((f) => f.isValid);
+  /// 使えるインポート用(SQL取り込み)のポストファイル。
+  List<PostFileInfo> get imports => [for (final f in files) if (f.isValid && f.meta!.role == PostRole.import) f];
+
+  /// 使えるエクスポート用のポストファイルが1つ以上あるか。
+  bool get hasValid => files.any((f) => f.isValid && f.meta!.role == PostRole.export);
 
   /// 適用できるデータベースの種類(kind)。関連付け([associations])を含む。
   Set<DbKind> kinds(Map<String, DbKind> associations) =>
@@ -95,6 +99,21 @@ class PostCatalog {
     for (final f in files) {
       if (f.path.toLowerCase() == p) return f;
     }
+    return null;
+  }
+}
+
+/// 共通ヘルパのファイル名(9.12-1)。
+const String postLibraryFileName = 'pero.lib.js';
+
+/// ポストファイルと同じフォルダにある共通ヘルパ `pero.lib.js` を読む。無ければnull(9.12-1)。
+String? loadPostLibrary(String postPath) {
+  final i = postPath.lastIndexOf(Platform.pathSeparator);
+  final dir = i < 0 ? '.' : postPath.substring(0, i);
+  final f = File('$dir${Platform.pathSeparator}$postLibraryFileName');
+  try {
+    return f.existsSync() ? f.readAsStringSync() : null;
+  } on FileSystemException {
     return null;
   }
 }
