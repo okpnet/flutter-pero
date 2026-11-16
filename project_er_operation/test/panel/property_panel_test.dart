@@ -104,6 +104,55 @@ void main() {
     expect(cur().checks.single.expression, 'id > 0');
   });
 
+  testWidgets('制約タブ: CHECK制約を「条件を選ぶ」で、列・演算子・値から作れる(6.4-6)', (tester) async {
+    session.setSelection([t.id]);
+    await pumpPanel(tester);
+    await tester.tap(find.widgetWithText(ChoiceChip, '制約'));
+    await tester.pump();
+    final addCheck = find.widgetWithText(FilledButton, '追加').last;
+    await tester.ensureVisible(addCheck);
+    await tester.tap(addCheck);
+    await tester.pump();
+    final check = cur().checks.single;
+    await tester.ensureVisible(find.byKey(ValueKey('ckmode${check.id}${check.mode}')));
+    await tester.tap(find.byKey(ValueKey('ckmode${check.id}${check.mode}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('条件を選ぶ(列・演算子・値)').last);
+    await tester.pumpAndSettle();
+    expect(cur().checks.single.mode, CheckMode.conditions);
+    expect(cur().checks.single.conditions.single.columnId, cur().columns.first.id);
+    expect(find.text('検査式(括弧の内側)'), findsNothing);
+
+    // 演算子を BETWEEN にすると、値が2つになる。
+    final op = find.byType(DropdownButtonFormField<CheckOperator>);
+    await tester.ensureVisible(op);
+    await tester.tap(op);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('BETWEEN').last);
+    await tester.pumpAndSettle();
+    expect(cur().checks.single.conditions.single.operator, CheckOperator.between);
+    expect(cur().checks.single.conditions.single.values.length, 2);
+    await tester.enterText(find.widgetWithText(TextField, '値(から)'), '1');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextField, '値(まで)'), '9');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(cur().checks.single.conditions.single.values, ['1', '9']);
+
+    // 条件を追加すると、結合(AND / OR)を選べる。
+    final addCond = find.widgetWithText(TextButton, '条件を追加');
+    await tester.ensureVisible(addCond);
+    await tester.tap(addCond);
+    await tester.pumpAndSettle();
+    expect(cur().checks.single.conditions.length, 2);
+    expect(find.byType(DropdownButtonFormField<CheckJoin>), findsOneWidget);
+    // 元に戻せる。
+    session.undo();
+    await tester.pump();
+    expect(cur().checks.single.conditions.length, 1);
+  });
+
   testWidgets('トリガー: 引数とUPDATEの対象(指定した列)を設定できる(6.5-2)', (tester) async {
     cur().triggers.add(TriggerDef(
         id: session.model.allocateId(),

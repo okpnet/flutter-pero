@@ -3,7 +3,7 @@ import 'dart:convert';
 import '../model/model.dart';
 
 /// 生成用JSON(付録B)のバージョン。付録Bを変更するときに上げる。
-const int postApiVersion = 3;
+const int postApiVersion = 4;
 
 /// 生成用JSONを作る。生成前検証(9.5)のエラーがないモデルを前提とする。
 class GenerationJsonBuilder {
@@ -330,11 +330,35 @@ class GenerationJsonBuilder {
             'nullsNotDistinct': c.nullsNotDistinct,
           }
       ],
-      'checks': [
-        for (final c in t.checks) {'name': model.checkName(t, c), 'expression': c.expression}
-      ],
+      'checks': [for (final c in t.checks) _check(t, c)],
       'triggers': [
         for (var i = 0; i < t.triggers.length; i++) _trigger(t, t.triggers[i], i + 1)
+      ],
+    };
+  }
+
+  /// CHECK制約。式のときは `expression`、条件のときは `conditions`(列の型とカテゴリ付き)を使う。
+  /// 条件のSQLへの変換(型に合わせた値の書き方)は、ポストファイルが行う(6.4-6)。
+  Map<String, Object?> _check(TableEntity t, CheckDef c) {
+    final isCond = c.mode == CheckMode.conditions;
+    return {
+      'name': model.checkName(t, c),
+      'mode': c.mode.wire,
+      'expression': isCond ? '' : c.expression,
+      'join': c.join.wire,
+      'conditions': [
+        if (isCond)
+          for (final x in c.conditions)
+            () {
+              final col = model.findExpandedColumn(t, x.columnId)?.column;
+              return {
+                'column': col?.physicalName ?? '',
+                'type': col == null ? '' : _typeString(col),
+                'typeCategory': col == null ? 'string' : _category(col.typeId),
+                'operator': x.operator.wire,
+                'values': x.values,
+              };
+            }()
       ],
     };
   }

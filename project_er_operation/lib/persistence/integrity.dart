@@ -172,6 +172,13 @@ class IntegrityRepairer {
           return false;
         });
       }
+      for (final k in t.checks) {
+        final before = k.conditions.length;
+        k.conditions.removeWhere((x) => !valid(x.columnId));
+        if (k.conditions.length != before) {
+          rep.add('テーブル ${t.physicalName} のCHECK制約の存在しない列の条件を削除');
+        }
+      }
       for (final g in t.triggers) {
         final before = g.updateColumnIds.length;
         g.updateColumnIds.removeWhere((id) => !valid(id));

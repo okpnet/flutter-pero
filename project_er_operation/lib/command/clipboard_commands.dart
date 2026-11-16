@@ -155,6 +155,10 @@ class PasteEntitiesCommand extends ModelCommand {
         for (final k in (em['checks'] as List? ?? const [])) {
           final km = k as Map;
           km['id'] = m.allocateId();
+          for (final x in (km['conditions'] as List? ?? const [])) {
+            final xm = x as Map;
+            xm['columnId'] = columnMap[xm['columnId']] ?? xm['columnId'];
+          }
           if (km['nameMode'] == 'manual') km['name'] = copyConstraintName('${km['name']}');
         }
         for (final g in (em['triggers'] as List)) {

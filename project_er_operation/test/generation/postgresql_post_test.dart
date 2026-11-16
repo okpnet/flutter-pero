@@ -109,7 +109,7 @@ void main() {
   test('生成用JSONの構造(付録B): 共通列のorigin、type展開、primaryKey、制約名の解決', () {
     final m = modelCommonColumns();
     final json = GenerationJsonBuilder(m).build();
-    expect(json['apiVersion'], 3);
+    expect(json['apiVersion'], 4);
     expect(json['targetDb'], 'postgresql');
     final t = (json['tables'] as List).firstWhere((t) => t['physicalName'] == 'mst_item');
     expect((t['columns'] as List).map((c) => c['origin']), ['common', 'table', 'table', 'common', 'common']);
@@ -159,12 +159,12 @@ void main() {
 
   test('メタ情報 @post の解析とapiVersion検査', () {
     final meta = parsePostMeta(postScript)!;
-    expect((meta.name, meta.targetDb, meta.apiVersion), ('PostgreSQL', 'postgresql', 3));
+    expect((meta.name, meta.targetDb, meta.apiVersion), ('PostgreSQL', 'postgresql', 4));
     expect(checkPostApiVersion(meta), isNull);
     expect(parsePostMeta('// no meta\nfunction main(){}'), isNull);
-    expect(checkPostApiVersion(parsePostMeta('// @post name=x y targetDb=mysql apiVersion=4')), isNotNull);
+    expect(checkPostApiVersion(parsePostMeta('// @post name=x y targetDb=mysql apiVersion=5')), isNotNull);
     expect(checkPostApiVersion(parsePostMeta('// @post name=x y targetDb=mysql apiVersion=1')), isNotNull);
-    expect(parsePostMeta('// @post name=x y targetDb=mysql apiVersion=4')!.name, 'x y');
+    expect(parsePostMeta('// @post name=x y targetDb=mysql apiVersion=5')!.name, 'x y');
     // 先頭10行を超えた位置のメタ情報は無効
     expect(parsePostMeta('${'\n' * 10}// @post name=a targetDb=b apiVersion=1'), isNull);
   });

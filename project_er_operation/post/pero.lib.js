@@ -263,7 +263,7 @@ var pero = (function () {
    */
   P.ImportResult = function (dialect) {
     var data = {
-      apiVersion: 3,
+      apiVersion: 4,
       dialect: dialect || '',
       tables: [], constraints: [], triggers: [], functions: [], views: [], types: [], comments: [],
       unparsed: []

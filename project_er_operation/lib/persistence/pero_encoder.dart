@@ -3,7 +3,7 @@ import 'dart:convert';
 import '../model/model.dart';
 
 /// 現行のフォーマットバージョン。
-const int currentFormatVersion = 3;
+const int currentFormatVersion = 4;
 
 /// `.pero` の保存形式(付録A)。スキーマを明示的に定義した実装(11.4)。
 /// キーの順は付録Aのとおり。
@@ -118,8 +118,18 @@ class PeroEncoder {
         'nullsNotDistinct': c.nullsNotDistinct,
       };
 
-  static Map<String, Object?> checkToMap(CheckDef c) =>
-      {'id': c.id, 'nameMode': c.nameMode.wire, 'name': c.name, 'expression': c.expression};
+  static Map<String, Object?> checkToMap(CheckDef c) => {
+        'id': c.id,
+        'nameMode': c.nameMode.wire,
+        'name': c.name,
+        'mode': c.mode.wire,
+        'expression': c.expression,
+        'join': c.join.wire,
+        'conditions': [
+          for (final x in c.conditions)
+            {'columnId': x.columnId, 'operator': x.operator.wire, 'values': x.values}
+        ],
+      };
 
   static Map<String, Object?> triggerToMap(TriggerDef g) => {
         'id': g.id,

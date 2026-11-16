@@ -1170,21 +1170,248 @@ class _ChecksEditor extends StatelessWidget {
                     ),
                   ],
                   _gap(),
-                  CommitTextField(
-                    key: ValueKey('cke${c.id}'),
-                    label: '検査式(括弧の内側)',
-                    value: c.expression,
-                    enabled: enabled,
-                    multiline: true,
-                    validator: (v) => v.trim().isEmpty ? '検査式は必須です' : null,
-                    onCommit: (v) =>
-                        onChange((l) => l.firstWhere((e) => e.id == c.id).expression = v),
+                  _dropdown<CheckMode>(
+                    key: ValueKey('ckmode${c.id}${c.mode}'),
+                    label: '記述方法',
+                    value: c.mode,
+                    items: const [
+                      DropdownMenuItem(value: CheckMode.expression, child: Text('式を直接入力')),
+                      DropdownMenuItem(value: CheckMode.conditions, child: Text('条件を選ぶ(列・演算子・値)')),
+                    ],
+                    onChanged: enabled
+                        ? (v) => onChange((l) {
+                              final x = l.firstWhere((e) => e.id == c.id);
+                              x.mode = v ?? CheckMode.expression;
+                              if (x.mode == CheckMode.conditions && x.conditions.isEmpty) {
+                                final first = session.model.expand(table).columns.firstOrNull;
+                                if (first != null) {
+                                  x.conditions.add(_newCondition(session.model, first.column));
+                                }
+                              }
+                            })
+                        : null,
                   ),
+                  _gap(),
+                  if (c.mode == CheckMode.expression)
+                    CommitTextField(
+                      key: ValueKey('cke${c.id}'),
+                      label: '検査式(括弧の内側)',
+                      value: c.expression,
+                      enabled: enabled,
+                      multiline: true,
+                      validator: (v) => v.trim().isEmpty ? '検査式は必須です' : null,
+                      onCommit: (v) =>
+                          onChange((l) => l.firstWhere((e) => e.id == c.id).expression = v),
+                    )
+                  else
+                    _CheckConditionsEditor(
+                      table: table,
+                      session: session,
+                      check: c,
+                      enabled: enabled,
+                      onChange: (f) => onChange((l) => f(l.firstWhere((e) => e.id == c.id))),
+                    ),
                 ],
               ),
             ),
           ),
       ],
+    );
+  }
+}
+
+/// 新しい条件。真偽値の列は、初期値を true にする。
+CheckCondition _newCondition(ErModel m, ColumnDef col) => CheckCondition(
+    columnId: col.id,
+    values: [m.typeById(col.typeId)?.category == TypeCategory.boolean ? 'true' : '']);
+
+/// CHECK制約の条件(列、演算子、値)。SQLへの変換は、列の型に合わせてポストファイルが行う(6.4-6)。
+class _CheckConditionsEditor extends StatelessWidget {
+  const _CheckConditionsEditor({
+    required this.table,
+    required this.session,
+    required this.check,
+    required this.enabled,
+    required this.onChange,
+  });
+  final TableEntity table;
+  final EditorSession session;
+  final CheckDef check;
+  final bool enabled;
+  final void Function(void Function(CheckDef c) f) onChange;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = session.model;
+    final cols = m.expand(table).columns;
+    TypeCategory cat(ColumnDef c) => m.typeById(c.typeId)?.category ?? TypeCategory.string;
+    final k = check;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (k.conditions.length > 1) ...[
+          _dropdown<CheckJoin>(
+            key: ValueKey('ckj${k.id}${k.join}'),
+            label: '条件の結合',
+            value: k.join,
+            items: const [
+              DropdownMenuItem(value: CheckJoin.and, child: Text('すべて満たす(AND)')),
+              DropdownMenuItem(value: CheckJoin.or, child: Text('どれかを満たす(OR)')),
+            ],
+            onChanged: enabled ? (v) => onChange((c) => c.join = v ?? CheckJoin.and) : null,
+          ),
+          _gap(),
+        ],
+        for (var i = 0; i < k.conditions.length; i++) ...[
+          _condition(context, i, k.conditions[i], cols, cat),
+          _gap(8),
+        ],
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: enabled && cols.isNotEmpty
+                ? () => onChange((c) => c.conditions.add(_newCondition(m, cols.first.column)))
+                : null,
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('条件を追加'),
+          ),
+        ),
+        _hint(context, '値は引用符なしで入力します(型に合わせてSQLの書き方が決まります)'),
+      ],
+    );
+  }
+
+  Widget _condition(BuildContext context, int i, CheckCondition x, List<ExpandedColumn> cols,
+      TypeCategory Function(ColumnDef) cat) {
+    final selected = cols.where((e) => e.column.id == x.columnId).firstOrNull;
+    final category = selected == null ? TypeCategory.string : cat(selected.column);
+    final ops = CheckOperator.allowedFor(category);
+    final (lo, _) = x.operator.valueCount;
+    final inList = x.operator == CheckOperator.inList || x.operator == CheckOperator.notInList;
+    final base = '${check.id}_$i';
+
+    void setOperator(CheckOperator op) => onChange((c) {
+          final t = c.conditions[i];
+          t.operator = op;
+          final (min, max) = op.valueCount;
+          while (t.values.length < min) {
+            t.values.add('');
+          }
+          if (max != null && t.values.length > max) t.values.removeRange(max, t.values.length);
+        });
+
+    Widget valueField(int vi) {
+      final value = vi < x.values.length ? x.values[vi] : '';
+      final label = x.operator == CheckOperator.between ? (vi == 0 ? '値(から)' : '値(まで)') : '値';
+      if (category == TypeCategory.boolean) {
+        return _dropdown<String>(
+          key: ValueKey('ckv${base}_${vi}_$value'),
+          label: label,
+          value: RegExp(r'^(true|1)$', caseSensitive: false).hasMatch(value) ? 'true' : 'false',
+          items: const [
+            DropdownMenuItem(value: 'true', child: Text('true')),
+            DropdownMenuItem(value: 'false', child: Text('false')),
+          ],
+          onChanged: enabled ? (v) => onChange((c) => c.conditions[i].values[vi] = v ?? 'false') : null,
+        );
+      }
+      return Row(
+        children: [
+          Expanded(
+            child: CommitTextField(
+              key: ValueKey('ckv${base}_${vi}_${x.columnId}_${x.operator}'),
+              label: inList ? '値${vi + 1}' : label,
+              value: value,
+              enabled: enabled,
+              validator: (v) => v.trim().isEmpty ? '値は必須です' : null,
+              onCommit: (v) => onChange((c) => c.conditions[i].values[vi] = v),
+            ),
+          ),
+          if (inList && x.values.length > 1)
+            IconButton(
+              tooltip: '値を削除',
+              icon: const Icon(Icons.close, size: 16),
+              onPressed: enabled ? () => onChange((c) => c.conditions[i].values.removeAt(vi)) : null,
+            ),
+        ],
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        border: Border.all(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text('条件${i + 1}', style: Theme.of(context).textTheme.labelLarge)),
+              IconButton(
+                tooltip: '条件を削除',
+                icon: const Icon(Icons.delete_outline, size: 18),
+                onPressed: enabled && check.conditions.length > 1
+                    ? () => onChange((c) => c.conditions.removeAt(i))
+                    : null,
+              ),
+            ],
+          ),
+          _dropdown<int>(
+            key: ValueKey('ckc${base}_${x.columnId}'),
+            label: '列',
+            value: selected == null ? null : x.columnId,
+            items: [
+              for (final e in cols)
+                DropdownMenuItem(
+                  value: e.column.id,
+                  child: Text('${e.column.physicalName}(${cat(e.column).wire})', overflow: TextOverflow.ellipsis),
+                ),
+            ],
+            onChanged: enabled
+                ? (v) => onChange((c) {
+                      if (v == null) return;
+                      final t = c.conditions[i];
+                      t.columnId = v;
+                      final col = cols.firstWhere((e) => e.column.id == v).column;
+                      final allowed = CheckOperator.allowedFor(cat(col));
+                      if (!allowed.contains(t.operator)) {
+                        t.operator = CheckOperator.eq;
+                        t.values = [''];
+                      }
+                      // 型が変わると値の書き方が変わるため、真偽値は true / false にそろえる。
+                      if (cat(col) == TypeCategory.boolean) {
+                        t.values = [for (final _ in t.values) 'true'];
+                      }
+                    })
+                : null,
+          ),
+          _gap(8),
+          _dropdown<CheckOperator>(
+            key: ValueKey('cko${base}_${x.operator}_$category'),
+            label: '演算子',
+            value: ops.contains(x.operator) ? x.operator : null,
+            items: [for (final o in ops) DropdownMenuItem(value: o, child: Text(o.label))],
+            onChanged: enabled ? (v) => v == null ? null : setOperator(v) : null,
+          ),
+          for (var vi = 0; vi < (x.values.length < lo ? lo : x.values.length); vi++) ...[
+            _gap(8),
+            valueField(vi),
+          ],
+          if (inList) ...[
+            _gap(4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: enabled ? () => onChange((c) => c.conditions[i].values.add('')) : null,
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('値を追加'),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

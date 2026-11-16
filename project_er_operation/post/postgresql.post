@@ -1,6 +1,6 @@
-// @post name=PostgreSQL targetDb=postgresql apiVersion=3
+// @post name=PostgreSQL targetDb=postgresql apiVersion=4
 //
-// PERO 同梱のポストファイル(PostgreSQL用)。生成用JSON(apiVersion 3)からSQLを作る。
+// PERO 同梱のポストファイル(PostgreSQL用)。生成用JSON(apiVersion 4)からSQLを作る。
 // 出力順: 開始クエリ → スキーマ → ユーザー定義型 → ファンクション → テーブル(依存するファンクションを直後に)
 //         → 外部キー → ビュー → トリガー → 終了クエリ
 //
@@ -28,6 +28,33 @@ function main(jsonText) {
   function qt(schema, name) { return schema ? q(schema) + '.' + q(name) : q(name); }
   var drop = m.model.dropBeforeCreate === true;
   function list(names) { return names.map(q).join(', '); }
+
+  // CHECK制約。式(mode=expression)はそのまま、条件(mode=conditions)は列の型(typeCategory)に合わせて値を書く(6.4-6)。
+  var BOOL_TRUE = 'true', BOOL_FALSE = 'false';
+  var CHECK_OPS = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' };
+  function checkValue(c, v) {
+    var s = String(v).trim();
+    if (c.typeCategory === 'number' || c.typeCategory === 'auto') return s;
+    if (c.typeCategory === 'boolean') return /^(true|1)$/i.test(s) ? BOOL_TRUE : BOOL_FALSE;
+    return lit(v);
+  }
+  function checkSql(k) {
+    if (k.mode !== 'conditions') return k.expression;
+    return k.conditions.map(function (c) {
+      var col = q(c.column);
+      var vs = c.values.map(function (v) { return checkValue(c, v); });
+      switch (c.operator) {
+        case 'in': return col + ' IN (' + vs.join(', ') + ')';
+        case 'not_in': return col + ' NOT IN (' + vs.join(', ') + ')';
+        case 'between': return col + ' BETWEEN ' + vs[0] + ' AND ' + vs[1];
+        case 'like': return col + ' LIKE ' + lit(c.values[0]);
+        case 'not_like': return col + ' NOT LIKE ' + lit(c.values[0]);
+        case 'is_null': return col + ' IS NULL';
+        case 'is_not_null': return col + ' IS NOT NULL';
+        default: return col + ' ' + CHECK_OPS[c.operator] + ' ' + vs[0];
+      }
+    }).join(' ' + k.join + ' ');
+  }
   function endSemi(s) {
     var t = s.replace(/\s+$/, '');
     return /;$/.test(t) ? t : t + ';';
@@ -100,7 +127,7 @@ function main(jsonText) {
       lines.push('  CONSTRAINT ' + q(t.primaryKey.name) + ' PRIMARY KEY (' + list(t.primaryKey.columns) + ')');
     }
     t.checks.forEach(function (k) {
-      lines.push('  CONSTRAINT ' + q(k.name) + ' CHECK (' + k.expression + ')');
+      lines.push('  CONSTRAINT ' + q(k.name) + ' CHECK (' + checkSql(k) + ')');
     });
     push('CREATE TABLE ' + name + ' (\n' + lines.join(',\n') + '\n);');
     t.indexes.forEach(function (i) {

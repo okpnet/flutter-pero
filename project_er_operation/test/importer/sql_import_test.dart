@@ -60,8 +60,8 @@ void main() {
     expect(imp.role, PostRole.import);
     expect(checkPostApiVersion(imp), isNull);
     expect(parsePostMeta(File('post/postgresql.post').readAsStringSync())!.role, PostRole.export);
-    expect(parsePostMeta('// @post name=a b targetDb=mysql apiVersion=3 role=import')!.name, 'a b');
-    expect(parsePostMeta('// @post name=a targetDb=mysql apiVersion=3 role=zzz'), isNull);
+    expect(parsePostMeta('// @post name=a b targetDb=mysql apiVersion=4 role=import')!.name, 'a b');
+    expect(parsePostMeta('// @post name=a targetDb=mysql apiVersion=4 role=zzz'), isNull);
   });
 
   test('インポートのポストファイルは、カタログのエクスポート一覧に出ない', () {

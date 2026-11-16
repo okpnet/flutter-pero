@@ -237,8 +237,46 @@ class ModelValidator {
 
     for (final c in t.checks) {
       if (c.nameMode == NameMode.manual) _checkName('CHECK制約名', c.name, eid: t.id);
-      if (c.expression.trim().isEmpty) {
-        _err('テーブル「${t.physicalName}」のCHECK制約「${model.checkName(t, c)}」の式が空です', t.id);
+      final label = 'テーブル「${t.physicalName}」のCHECK制約「${model.checkName(t, c)}」';
+      if (c.mode == CheckMode.expression) {
+        if (c.expression.trim().isEmpty) _err('$labelの式が空です', t.id);
+        continue;
+      }
+      if (c.conditions.isEmpty) _err('$labelの条件がありません', t.id);
+      for (final x in c.conditions) {
+        final col = exp.columns.where((e) => e.column.id == x.columnId).firstOrNull?.column;
+        if (col == null) {
+          final pc = model.patternColumnById(x.columnId);
+          _err(
+              pc != null
+                  ? '共通列 ${pc.physicalName} がテーブル ${t.physicalName} に展開されません(CHECK制約)'
+                  : '$labelが存在しない列を参照しています',
+              t.id);
+          continue;
+        }
+        final colCat = model.typeById(col.typeId)?.category ?? TypeCategory.string;
+        if (!CheckOperator.allowedFor(colCat).contains(x.operator)) {
+          _err('$labelの列「${col.physicalName}」(${colCat.wire})では、「${x.operator.label}」は使えません', t.id);
+          continue;
+        }
+        final (lo, hi) = x.operator.valueCount;
+        final n = x.values.length;
+        if (n < lo || (hi != null && n > hi)) {
+          _err('$labelの「${col.physicalName} ${x.operator.label}」の値の数が正しくありません', t.id);
+          continue;
+        }
+        final cat = model.typeById(col.typeId)?.category;
+        for (final v in x.values) {
+          final what = '$labelの「${col.physicalName} ${x.operator.label}」の値';
+          if (v.trim().isEmpty) {
+            _err('$whatが空です', t.id);
+          } else if (cat == TypeCategory.boolean && !RegExp(r'^(true|false|1|0)$', caseSensitive: false).hasMatch(v.trim())) {
+            _err('$what「$v」は、真偽値(true / false / 1 / 0)ではありません', t.id);
+          } else if ((cat == TypeCategory.number || cat == TypeCategory.auto) &&
+              !RegExp(r'^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$').hasMatch(v.trim())) {
+            _err('$what「$v」は、数値ではありません', t.id);
+          }
+        }
       }
     }
 

@@ -1,4 +1,4 @@
-// @post name=私のデータベース(エクスポート) targetDb=postgresql apiVersion=3 role=export
+// @post name=私のデータベース(エクスポート) targetDb=postgresql apiVersion=4 role=export
 //
 // エクスポート用ポストファイルのひな形。
 //   1. このファイルをポストフォルダ(post)へコピーして、名前を変える(例: mydb.post)

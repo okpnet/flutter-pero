@@ -1,4 +1,4 @@
-// @post name=PostgreSQL(インポート) targetDb=postgresql apiVersion=3 role=import
+// @post name=PostgreSQL(インポート) targetDb=postgresql apiVersion=4 role=import
 //
 // PERO 同梱のインポート用ポストファイル(PostgreSQL)。SQL(DDL)を読み、インポート結果(付録E)のJSONを返す。
 //   入力: JSON文字列 { "files": [ { "name": "01.sql", "text": "..." } ] }

@@ -1,4 +1,4 @@
-// @post name=私のデータベース(インポート) targetDb=postgresql apiVersion=3 role=import
+// @post name=私のデータベース(インポート) targetDb=postgresql apiVersion=4 role=import
 //
 // インポート用ポストファイルのひな形。SQL(DDL)を読み、インポート結果(付録E)のJSONを返す。
 //   1. このファイルをポストフォルダ(post)へコピーして、名前を変える(例: mydb.import.post)

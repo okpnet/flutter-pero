@@ -358,11 +358,33 @@ class PeroDecoder {
       final m = _obj(x, p);
       final id = _id(m, p);
       if (id == null) continue;
+      final conds = <CheckCondition>[];
+      var j = 0;
+      for (final y in _list(m['conditions'], '$p.conditions')) {
+        final cp = '$p.conditions[${j++}]';
+        final cm = _obj(y, cp);
+        final col = cm['columnId'];
+        if (col is! int) {
+          _rep.add('$cp.columnId: 不正な条件を削除');
+          continue;
+        }
+        final values = <String>[];
+        for (final x in _list(cm['values'], '$cp.values')) {
+          values.add(x is String ? x : '$x');
+        }
+        conds.add(CheckCondition(
+            columnId: col,
+            operator: _enum(CheckOperator.values, cm, 'operator', cp, CheckOperator.eq),
+            values: values));
+      }
       out.add(CheckDef(
           id: id,
           nameMode: _enum(NameMode.values, m, 'nameMode', p, NameMode.auto),
           name: _str(m, 'name', p),
-          expression: _str(m, 'expression', p)));
+          mode: _enumN(CheckMode.values, m, 'mode', p, CheckMode.expression),
+          expression: _str(m, 'expression', p),
+          join: _enumN(CheckJoin.values, m, 'join', p, CheckJoin.and),
+          conditions: conds));
     }
     return out;
   }

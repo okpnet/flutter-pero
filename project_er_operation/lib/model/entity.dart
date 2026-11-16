@@ -82,16 +82,54 @@ class ConstraintDef {
 
 /// CHECK制約(6.4-5)。
 class CheckDef {
-  CheckDef({required this.id, this.nameMode = NameMode.auto, this.name = '', this.expression = ''});
+  CheckDef({
+    required this.id,
+    this.nameMode = NameMode.auto,
+    this.name = '',
+    this.expression = '',
+    this.mode = CheckMode.expression,
+    this.join = CheckJoin.and,
+    List<CheckCondition>? conditions,
+  }) : conditions = conditions ?? [];
 
   final int id;
   NameMode nameMode;
   String name;
 
+  /// 記述方法。式のとき [expression] を、条件のとき [conditions] を使う(使わない方も保持する)。
+  CheckMode mode;
+
   /// 検査式(括弧の内側)。そのまま出力する。
   String expression;
 
-  CheckDef copy() => CheckDef(id: id, nameMode: nameMode, name: name, expression: expression);
+  /// 条件が複数のときの結合。
+  CheckJoin join;
+
+  /// 条件(列、演算子、値)。SQLへの変換(型に合わせた値の書き方)は、ポストファイルが行う。
+  List<CheckCondition> conditions;
+
+  CheckDef copy() => CheckDef(
+      id: id,
+      nameMode: nameMode,
+      name: name,
+      expression: expression,
+      mode: mode,
+      join: join,
+      conditions: conditions.map((c) => c.copy()).toList());
+}
+
+/// CHECK制約の1つの条件。列は、実列または共通列(8.2)のIDで参照する。
+class CheckCondition {
+  CheckCondition({required this.columnId, this.operator = CheckOperator.eq, List<String>? values})
+      : values = values ?? [''];
+
+  int columnId;
+  CheckOperator operator;
+
+  /// 値(演算子により個数が決まる。[CheckOperator.valueCount])。引用符は付けずに入力する。
+  List<String> values;
+
+  CheckCondition copy() => CheckCondition(columnId: columnId, operator: operator, values: List.of(values));
 }
 
 /// トリガー(6.5)。
